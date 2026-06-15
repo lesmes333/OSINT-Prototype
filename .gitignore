@@ -1,0 +1,32 @@
+# Entorno virtual
+venv/
+env/
+ENV/
+
+# Archivos Python
+__pycache__/
+*.pyc
+*.pyo
+
+# API keys (importante: no subir tus claves reales)
+.env
+
+# Resultados generados (los informes se guardan en outputs/)
+outputs/
+informe_*.html
+informe_*.md
+activos_*.json
+subdominios_*.csv
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Directorio de wappalyzer-next (se clona aparte)
+scripts/wappalyzer-next/

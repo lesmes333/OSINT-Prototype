@@ -1,0 +1,35 @@
+# =====================================================================
+#  OSINT Recon Suite — dependencias de Python
+#  Instala todo con:  pip install -r requirements.txt
+#  (Python 3.9 o superior. Probado en 3.14)
+# =====================================================================
+
+# ---------------------------------------------------------------------
+#  OBLIGATORIAS — la herramienta no arranca sin ellas
+# ---------------------------------------------------------------------
+requests>=2.28.0             # Cliente HTTP base
+PySocks>=1.7.1               # Soporte SOCKS5 para enrutar peticiones por Tor (requests[socks])
+urllib3>=1.26.0              # Reintentos HTTP automáticos (Retry ante 429/5xx)
+beautifulsoup4>=4.11.0       # Parseo de HTML (dark web, DNSdumpster, scraping)
+python-dotenv>=1.0.0         # Carga de las API keys desde el archivo .env
+dnspython>=2.2.0             # Consultas DNS (registros A, MX, NS, TXT…)
+python-whois>=0.7.0          # Datos WHOIS del dominio
+rich>=13.0.0                 # Interfaz visual de terminal (tablas, colores, paneles)
+
+# ---------------------------------------------------------------------
+#  OPCIONALES — habilitan o mejoran fases concretas.
+#  Sin ellas la herramienta funciona, pero esas funciones se omiten.
+# ---------------------------------------------------------------------
+nvdlib>=0.7.0                # Fase 2.5: búsqueda de CVEs en la API del NVD
+osint-darkweb-pkg>=0.1.0     # Fase 4: búsqueda multi-motor en la dark web (15+ motores)
+censys>=2.2.0                # Threat Intel: consultas a la API de Censys
+lxml>=4.9.0                  # Parser HTML más rápido para BeautifulSoup
+pandas>=1.5.0                # Manipulación opcional de datos en informes
+
+# =====================================================================
+#  NOTA — herramientas que NO se instalan con pip (ver README):
+#    · Docker + wappalyzer-next  → fingerprinting de tecnologías
+#    · Tor (servicio en 127.0.0.1:9050) → monitorización de dark web
+#    · subfinder (binario Go)    → descubrimiento extra de subdominios
+#    · searchsploit / exploitdb  → correlación con exploits de Exploit-DB
+# =====================================================================
