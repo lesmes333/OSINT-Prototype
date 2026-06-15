@@ -462,53 +462,184 @@ class ReportGenerator:
             md_content += "⏩ Monitorización de exposición omitida por el usuario.\n"
         elif dw.get('status') == 'success':
             summary = dw.get('summary', {})
-            md_content += f"- **Nivel de exposición:** {summary.get('nivel_exposicion', 'N/A')}\n"
+            nivel = summary.get('nivel_exposicion', 'N/A')
+            nivel_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(nivel, "⚪")
+            md_content += f"- **Nivel de exposición:** {nivel_icon} **{nivel}**\n"
             md_content += f"- **Correos comprometidos:** {summary.get('emails_comprometidos', 0)}\n"
-            md_content += f"- **Menciones en .onion (Ahmia):** {summary.get('menciones_onion', 0)}\n"
-            md_content += f"- **Pastes encontrados:** {summary.get('pastes', 0)}\n\n"
+            md_content += f"- **Menciones en .onion (Capa 2):** {summary.get('menciones_onion', 0)}\n"
+            md_content += f"- **Análisis URLScan histórico (Capa 3):** {summary.get('urlscan_historico', 0)}\n"
+            md_content += f"- **Menciones en repos públicos — GitHub (Capa 3):** {summary.get('github_menciones', 0)}\n"
+            rw_incidents = summary.get('ransomware_incidents', 0)
+            rw_nivel = summary.get('ransomware_nivel', 'LOW')
+            md_content += f"- **Incidentes ransomware/ciberataques (Capa 4):** {rw_incidents} · riesgo {rw_nivel}\n"
+            md_content += f"- **Maltiverse clasificación:** {summary.get('maltiverse_clasificacion', 'neutral')}\n"
+            if summary.get('intelx_pastes', 0):
+                md_content += f"- **Registros IntelX (pastes/buckets):** {summary.get('intelx_pastes', 0)}\n"
+            md_content += "\n"
 
             # Capa 1: brechas de datos (lo más accionable)
             breaches = dw.get('breaches', {})
             comprometidos = [r for r in breaches.get('results', []) if r.get('found')]
+            db = breaches.get('domain_breaches', {})
+            lc_hits = [r for r in breaches.get('leakcheck', []) if not r.get('error')]
+            dh_hits = breaches.get('dehashed', [])
+
+            md_content += "#### 📧 Capa 1 — Brechas de datos\n\n"
             if comprometidos:
-                md_content += "#### 📧 Correos en filtraciones conocidas\n\n"
+                md_content += "**XposedOrNot (por email):**\n\n"
                 md_content += "| Email | Brechas |\n|-------|--------|\n"
                 for r in comprometidos:
                     md_content += f"| `{r.get('email','')}` | {', '.join(r.get('breaches', [])[:8])} |\n"
                 md_content += "\n"
+            else:
+                checked = breaches.get('checked_emails', 0)
+                if checked:
+                    md_content += f"✅ XposedOrNot: {checked} correos revisados — sin filtraciones detectadas.\n\n"
 
-            # Capa 3: pastes
-            pastes = dw.get('pastes', {}).get('pastes', [])
-            if pastes:
-                md_content += "#### 📋 Menciones en paste sites (PSBDMP)\n\n"
-                md_content += "| Fecha | Enlace |\n|-------|--------|\n"
-                for p in pastes[:20]:
-                    md_content += f"| {p.get('date','')} | `{p.get('url','')}` |\n"
+            if db.get('count', 0):
+                md_content += f"**XposedOrNot domain-level:** {db.get('count',0)} brechas afectan al dominio.\n\n"
+                if db.get('breaches'):
+                    md_content += "| Brecha |\n|--------|\n"
+                    for b in db['breaches'][:15]:
+                        md_content += f"| {b} |\n"
+                    md_content += "\n"
+
+            if lc_hits:
+                md_content += f"**⚠️ LeakCheck: {len(lc_hits)} credenciales filtradas del dominio**\n\n"
+                md_content += "| Email / Usuario | Fuente(s) |\n|----------------|----------|\n"
+                for r in lc_hits[:20]:
+                    ident = r.get('email') or r.get('username', '')
+                    src = ', '.join(r.get('source', [])[:3]) if r.get('source') else '—'
+                    md_content += f"| `{ident}` | {src} |\n"
+                md_content += "\n"
+            elif breaches.get('leakcheck_error', {}).get('error') == 'rate_limit':
+                md_content += "> ℹ️ LeakCheck: límite diario alcanzado (5/día plan free).\n\n"
+            elif self and not breaches.get('leakcheck'):
+                md_content += "> ℹ️ LeakCheck: sin LEAKCHECK_API_KEY — regístrate en https://leakcheck.io (gratis, 5 búsquedas/día).\n\n"
+
+            if dh_hits:
+                md_content += f"**💀 Dehashed: {len(dh_hits)} registros con credenciales del dominio**\n\n"
+                md_content += "| Email | Usuario | Base de datos |\n|-------|---------|---------------|\n"
+                for r in dh_hits[:20]:
+                    md_content += f"| `{r.get('email','')}` | {r.get('username','')} | {r.get('database','')} |\n"
                 md_content += "\n"
 
-            md_content += f"#### 🌑 Índice dark web (Ahmia): {dw.get('total_links_found', 0)} enlace(s) .onion\n\n"
+            # Capa 2: índice dark web
+            ahmia = dw.get('ahmia', {})
+            ahmia_status = ahmia.get('status', '')
+            if ahmia_status == 'requires_tor_or_intelx':
+                md_content += "#### 🌑 Capa 2 — Índice dark web\n\n"
+                md_content += f"> ⚠️ {ahmia.get('message', 'Activa Tor para búsqueda en dark web.')}\n\n"
+            elif ahmia.get('total', 0) > 0:
+                md_content += f"#### 🌑 Capa 2 — Índice dark web: {ahmia.get('total', 0)} enlace(s) .onion [{ahmia.get('method','')}]\n\n"
+                links = ahmia.get('links', [])
+                if links:
+                    md_content += "| Título | .onion | Fuente |\n|--------|--------|--------|\n"
+                    for ln in links[:10]:
+                        md_content += f"| {ln.get('title','')[:60]} | `{ln.get('onion','')}` | {ln.get('source','')} |\n"
+                    md_content += "\n"
+            else:
+                metodo = ahmia.get('method', '')
+                md_content += f"#### 🌑 Capa 2 — Índice dark web\n\n✅ Sin menciones del dominio en dark web [{metodo}].\n\n"
+
+            # Capa 3: leaks en fuentes abiertas
+            pastes_data = dw.get('pastes', {})
+            pastes_list = pastes_data.get('pastes', [])
+            notas_pastes = pastes_data.get('notas', [])
+            if notas_pastes:
+                for nota in notas_pastes:
+                    md_content += f"> ℹ️ {nota}\n"
+                md_content += "\n"
+            if pastes_list:
+                fuentes_str = " | ".join(pastes_data.get('fuentes', []))
+                md_content += f"#### 📋 Capa 3 — Leaks en fuentes abiertas — {fuentes_str}\n\n"
+                md_content += "| Fecha | Fuente | Enlace / Referencia |\n|-------|--------|---------------------|\n"
+                for p in pastes_list[:30]:
+                    tags   = p.get('tags', '')
+                    fecha  = p.get('date', '') or '—'
+                    url    = p.get('url', '')
+                    fuente = tags.split('|')[0].strip() if '|' in tags else tags
+                    md_content += f"| {fecha} | {fuente} | `{url[:80]}` |\n"
+                if pastes_data.get('github_total', 0) > 15:
+                    resto = pastes_data['github_total'] - 15
+                    md_content += f"\n*+ {resto} menciones más en GitHub no mostradas.*\n"
+                md_content += "\n"
+            else:
+                md_content += "#### 📋 Capa 3 — Leaks en fuentes abiertas\n\n✅ Sin leaks detectados en fuentes abiertas.\n\n"
+
+            # Capa 4: ransomware & ciberataques (NUEVO)
+            ransomware = dw.get('ransomware', {})
+            if ransomware:
+                rw_nivel_str = ransomware.get('nivel_riesgo', 'LOW')
+                rw_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(rw_nivel_str, "⚪")
+                md_content += f"#### 🦠 Capa 4 — Ransomware & Ciberataques — {rw_icon} {rw_nivel_str}\n\n"
+
+                victims   = ransomware.get('victims', [])
+                attacks   = ransomware.get('cyberattacks', [])
+                rl_hits   = ransomware.get('ransomlook', [])
+                maltiverse = ransomware.get('maltiverse', {})
+                infostealer = ransomware.get('infostealer', {})
+
+                if victims:
+                    md_content += "**⚠️ ALERTA: Dominio / empresa encontrado en leak sites de ransomware**\n\n"
+                    md_content += "| Grupo ransomware | Víctima | Sitio | Publicado |\n|------------------|---------|-------|-----------|\n"
+                    for v in victims[:10]:
+                        md_content += (f"| {v.get('grupo','')} | {v.get('victima','')[:60]} "
+                                       f"| {v.get('sitio','')} | {v.get('publicado','')} |\n")
+                    md_content += "\n"
+                    if infostealer:
+                        md_content += (f"> 💀 **Infostealer data:** "
+                                       f"{infostealer.get('empleados_comprometidos', 0)} empleados comprometidos, "
+                                       f"{infostealer.get('usuarios_comprometidos', 0)} usuarios, "
+                                       f"{infostealer.get('terceros_afectados', 0)} terceros afectados.\n\n")
+                elif attacks:
+                    md_content += "**ℹ️ Ciberataques relacionados detectados:**\n\n"
+                    md_content += "| Título | Dominio | País | Fecha |\n|--------|---------|------|-------|\n"
+                    for a in attacks[:10]:
+                        md_content += (f"| {a.get('titulo','')[:60]} | {a.get('dominio','')} "
+                                       f"| {a.get('pais','')} | {a.get('fecha','')} |\n")
+                    md_content += "\n"
+                else:
+                    md_content += "✅ Sin presencia en leak sites de grupos de ransomware activos.\n\n"
+
+                if rl_hits:
+                    md_content += "**RansomLook:**\n"
+                    for h in rl_hits[:5]:
+                        md_content += f"- {h.get('grupo','')} · {h.get('victima','')} · {h.get('fecha','')}\n"
+                    md_content += "\n"
+
+                if maltiverse:
+                    cls = maltiverse.get('clasificacion', 'neutral')
+                    bls = maltiverse.get('blacklist', [])
+                    tags = maltiverse.get('tags', [])
+                    md_content += f"**Maltiverse:** clasificación `{cls}`"
+                    if bls:
+                        md_content += f" · blacklists: {', '.join(str(b) for b in bls[:3])}"
+                    if tags:
+                        md_content += f" · tags: {', '.join(str(t) for t in tags[:5])}"
+                    md_content += f"\n\n> *Nota: {ransomware.get('nota','')}*\n\n"
+
+            # Capa 5: crawling .onion via Tor (si se ejecutó)
             raw_results = dw.get('raw_results', [])
             if raw_results:
-                md_content += "#### 🔎 Resultados de búsqueda (primeros 20)\n\n"
+                md_content += "#### 🔎 Capa 5 — Resultados dark web (crawling Tor)\n\n"
                 md_content += "| # | Título | Enlace |\n"
                 md_content += "|---|--------|--------|\n"
                 for i, r in enumerate(raw_results[:20], 1):
                     title = r.get('title', 'N/A')[:60]
-                    link = r.get('link', 'N/A')
+                    link  = r.get('link', 'N/A')
                     md_content += f"| {i} | {title} | `{link}` |\n"
             analyzed = dw.get('analyzed_threats', [])
             if analyzed:
-                md_content += "\n#### 🚨 Análisis de amenazas por crawling\n\n"
+                md_content += "\n#### 🚨 Análisis de amenazas por crawling (Tor)\n\n"
                 md_content += "| # | URL | Título | Nivel de amenaza | Correos encontrados |\n"
                 md_content += "|---|-----|--------|------------------|---------------------|\n"
                 for i, a in enumerate(analyzed, 1):
                     threat_icon = "🔴" if a['threat_level'] == 'HIGH' else "🟠" if a['threat_level'] == 'MEDIUM' else "🟢"
                     emails_str = ", ".join(a.get('emails', [])[:2]) if a.get('emails') else "-"
-                    url_short = a['url'][:60] + '...' if len(a['url']) > 60 else a['url']
+                    url_short  = a['url'][:60] + '...' if len(a['url']) > 60 else a['url']
                     title_short = a['title'][:40] + '...' if len(a['title']) > 40 else a['title']
                     md_content += f"| {i} | `{url_short}` | {title_short} | {threat_icon} {a['threat_level']} | {emails_str} |\n"
-            else:
-                md_content += "\n*No se pudo realizar el crawling/análisis de enlaces (sin resultados o error).*\n"
         else:
             md_content += "No se realizó búsqueda.\n"
 

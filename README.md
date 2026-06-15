@@ -30,7 +30,7 @@ Herramienta OSINT (Open Source Intelligence) para **descubrir los activos expues
 | **1. Descubrimiento** | Subdominios + DNS + WHOIS + actividad de hosts | crt.sh, certspotter, HackerTarget, RapidDNS, Anubis, OTX, Wayback, DNSdumpster, Subfinder |
 | **2. Threat Intel** | Reputación, puertos, geolocalización, emails, menciones | 13 APIs (Shodan, VirusTotal, Censys, AbuseIPDB, Hunter…) |
 | **2.5. Tecnologías + CVEs** | Fingerprinting → CVEs → exploits → **INCIBE-CERT** | Wappalyzer, NVD, Exploit-DB, **INCIBE-CERT** |
-| **4. Exposición y filtraciones** | Brechas de datos + índice dark web + paste sites (+ Tor opcional) | XposedOrNot, HIBP, Ahmia, PSBDMP, Tor |
+| **4. Exposición y filtraciones** | Brechas de datos + leaks en fuentes abiertas + dark web + Pastebin (+ Tor opcional) | XposedOrNot, URLScan, GitHub, Pastebin Pro, IntelX, Tor |
 | **3. Informes** | JSON · CSV · Markdown · **HTML visual** | — |
 
 ### ⚡ Rápido por diseño
@@ -38,16 +38,25 @@ Todas las fases con llamadas independientes se ejecutan **en paralelo** (subdomi
 
 ### 🛡️ Monitorización de exposición y filtraciones (Fase 4)
 
-Detecta exposición del dominio en fuentes públicas, deep web y dark web **legalmente accesibles**, por capas (todo defensivo y no intrusivo):
+Detecta exposición del dominio en fuentes públicas, deep web y dark web **legalmente accesibles**, por cinco capas (todo defensivo y no intrusivo):
 
-| Capa | Qué busca | Fuente | Requiere |
-|------|-----------|--------|----------|
-| **1. Brechas de datos** | Correos del dominio en filtraciones conocidas | XposedOrNot (gratis) + HIBP (`HIBP_API_KEY`, opcional) | — |
-| **2. Índice dark web** | Menciones del dominio en `.onion` indexados | Ahmia (por clearnet, **sin Tor**) | — |
-| **3. Paste sites** | Menciones en volcados de Pastebin | PSBDMP (gratis) | — |
-| **4. Crawling .onion** | Análisis de enlaces `.onion` (avanzado, opcional) | Tor | `--tor` + Tor en `:9050` |
+| Capa | Qué busca | Fuentes | Requiere |
+|------|-----------|---------|----------|
+| **1. Brechas de datos** | Correos y credenciales del dominio en filtraciones conocidas | XposedOrNot (gratis) · HIBP · **LeakCheck** (gratis 5/día) · **Dehashed** | — / `HIBP_API_KEY` / `LEAKCHECK_API_KEY` / `DEHASHED_*` |
+| **2. Índice dark web** | Menciones del dominio en motores .onion | **Ahmia .onion · OnionLand · DarkSearch · Haystak** (todos vía Tor) · IntelX (pago) | `--tor` + Tor en `:9050` / `INTELX_API_KEY` |
+| **3. Leaks en fuentes abiertas** | Historial público + repos + Pastebin | URLScan · GitHub · **Pastebin/archive vía Tor** (gratis) · Pastebin Pro · IntelX | `URLSCAN_API_KEY`, `GITHUB_TOKEN`, `PASTEBIN_API_KEY`* |
+| **4. Ransomware & Ciberataques** | Si el dominio aparece en leak sites de grupos de ransomware activos + reputación de dominio | **ransomware.live · RansomLook · Maltiverse** (todos gratis, sin clave) | — |
+| **5. Crawling .onion** | Análisis profundo de páginas `.onion` con contenido amenazante | Tor + Ahmia .onion + Haystak + Torch + 15 motores adicionales | `--tor` + Tor en `:9050` |
 
-Los correos a vigilar salen de **Hunter.io** (descubiertos automáticamente) y de la variable opcional **`MONITOR_EMAILS`** del `.env` (ej. `MONITOR_EMAILS="rrhh@zunder.com,soporte@zunder.com"`). Las capas 1-3 funcionan **sin Tor**; la capa 4 solo se ejecuta con `--tor`.
+> \* **Pastebin Pro** (`PASTEBIN_API_KEY`): el CISO considera Pastebin una fuente clave. Requiere cuenta Pro en [pastebin.com/pro](https://pastebin.com/pro) ($8.95/mes). Sin ella, la Capa 3 usa el **archivo público de Pastebin vía Tor** como alternativa gratuita.
+
+> 💡 **Capa 4 (Ransomware) sin coste:** las fuentes `ransomware.live`, `RansomLook` y `Maltiverse` son APIs públicas gratuitas y sin clave que cubren el mismo contenido que ofrecen herramientas comerciales de "dark web monitoring" a precios de $500–$5.000/mes.
+
+> ⚠️ **Sobre Ahmia en clearnet:** Ahmia.fi clearnet redirige a su homepage sin devolver resultados (requiere Tor Browser). La herramienta accede directamente al `.onion` de Ahmia vía Tor, evitando el problema. Usa `--tor` para activar las búsquedas en motores .onion.
+
+**Correos:** se descubren **automáticamente** desde Hunter.io durante el escaneo. No es necesario configurar `MONITOR_EMAILS`.
+
+**Sin ninguna clave de pago**, la Fase 4 funciona con: XposedOrNot + XposedOrNot domain-level + URLScan + GitHub + Pastebin/Tor + **todos los motores .onion** (con Tor) + ransomware.live + RansomLook + Maltiverse.
 
 > ✅ Solo se consultan índices y APIs públicas. No se accede a sistemas ajenos ni se descarga contenido ilegal. Acorde con un marco defensivo y autorizado.
 
@@ -296,19 +305,31 @@ Por cada dominio, en `outputs/` (o la carpeta indicada con `-o`):
 
 Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o agota su cuota, la herramienta **te avisa al final del escaneo** con el enlace exacto para renovarla:
 
+**Claves gratuitas** (sin coste):
+
 | Servicio | Variable | Obtener clave |
 |----------|----------|---------------|
 | Shodan | `SHODAN_API_KEY` | https://account.shodan.io |
 | VirusTotal | `VIRUSTOTAL_API_KEY` | https://www.virustotal.com/gui/my-apikey |
-| Censys | `CENSYS_PAT` / `CENSYS_ORG_ID` | https://platform.censys.io — ver nota abajo |
+| Censys | `CENSYS_PAT` | https://platform.censys.io — ver nota abajo |
 | AlienVault OTX | `ALIENVAULT_API_KEY` | https://otx.alienvault.com/settings |
-| Hunter.io | `HUNTER_API_KEY` | https://hunter.io/api-keys |
-| IPinfo | `IPINFO_API_KEY` | https://ipinfo.io/account/token |
+| Hunter.io | `HUNTER_API_KEY` | https://hunter.io/api-keys (25 búsquedas/mes gratis) |
+| IPinfo | `IPINFO_API_KEY` | https://ipinfo.io/account/token (50k/mes gratis) |
 | AbuseIPDB | `ABUSEIPDB_API_KEY` | https://www.abuseipdb.com/account/api |
 | urlscan.io | `URLSCAN_API_KEY` | https://urlscan.io/user/profile/ |
 | NVD | `NVD_API_KEY` | https://nvd.nist.gov/developers/request-an-api-key |
-| GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens |
+| GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens (scope: `public_repo`) |
 | GitLab | `GITLAB_TOKEN` | https://gitlab.com/-/profile/personal_access_tokens |
+| **LeakCheck** | `LEAKCHECK_API_KEY` | https://leakcheck.io → Registro gratuito → perfil → API (5 búsquedas/día gratis) |
+
+**Claves opcionales de pago** (amplían la Fase 4 — monitorización de exposición):
+
+| Servicio | Variable | Coste | Qué aporta |
+|----------|----------|-------|------------|
+| **Pastebin Pro** | `PASTEBIN_API_KEY` | $8.95/mes | Monitorización del feed de Pastebin en tiempo real. **Recomendado por el CISO.** Obtener en: https://pastebin.com/pro |
+| **Intelligence X** | `INTELX_API_KEY` | desde ~1800 USD/año | Búsqueda en dark web, paste sites históricos, buckets S3 expuestos, foros de hacking. El plan gratuito Open Source **no incluye** acceso API. Obtener en: https://intelx.io/product |
+| **Have I Been Pwned** | `HIBP_API_KEY` | desde ~3.50 USD/mes | Brechas de datos por email (enriquece XposedOrNot, que es gratis). Obtener en: https://haveibeenpwned.com/API/Key |
+| **Dehashed** | `DEHASHED_EMAIL` + `DEHASHED_API_KEY` | $5.49/mes | La BD de credenciales filtradas más grande (~15B registros). Búsqueda por dominio devuelve emails, usuarios, contraseñas, IPs y nombres reales. Obtener en: https://dehashed.com/profile |
 
 > ℹ️ **Nota sobre Censys (nuevo Platform API):** la herramienta usa el **Censys Platform** (https://platform.censys.io):
 > - `CENSYS_PAT` → tu **Personal Access Token** (icono de usuario → *API Access* → *Create New Token*; la cadena larga se muestra **solo al crearlo**).
@@ -330,6 +351,12 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | Shodan no devuelve puertos | El plan **gratuito (OSS)** de Shodan no permite el host lookup por API; la herramienta usa **InternetDB** (gratis, sin clave) como alternativa. Si igual sale vacío, es que **Shodan no tiene datos de esa IP** (no es un error). Con clave de pago se usa el endpoint completo automáticamente. |
 | Registros DNS vacíos | Tu red/resolver bloquea el puerto 53 saliente; prueba en otra red. |
 | Búsqueda de CVEs lenta | Sin `NVD_API_KEY` el límite es estricto (pausas de 6s). Añade la clave para acelerar. |
+| Ahmia no devuelve resultados | Ahmia.fi en clearnet redirige a su homepage **sin resultados** (requiere Tor Browser). La herramienta accede al **Ahmia .onion** vía Tor directamente — usa `--tor` para activarlo. |
+| IntelX devuelve 403 | El plan "Open Source Intelligence" gratuito **no incluye acceso API** (`/intelligent/search` devuelve 403). Se necesita un plan de pago. |
+| Pastebin sin resultados con Pro key | Verifica que la IP está en la whitelist de tu cuenta Pro. Sin key, se usa el archivo público vía Tor (alternativa gratuita). |
+| Censys devuelve 403 | El Free Tier de Censys **no permite el endpoint de búsqueda vía API** (solo UI web). El escaneo continúa con las demás fuentes. |
+| LeakCheck 403 | Límite diario alcanzado (5 búsquedas/día en plan gratuito). Se resetea cada 24h. |
+| `playwright install chromium` falla | En VMs con red restringida, el CDN de Chromium puede estar bloqueado. Usa `playwright install firefox` en su lugar. |
 
 ---
 
@@ -352,8 +379,8 @@ OSINT-Prototype/
     ├── incibe.py                # Integración con INCIBE-CERT (alerta temprana)
     ├── diffing.py               # Modo monitorización: compara con el escaneo anterior
     ├── diagnostics.py           # Estado de API keys y herramientas
-    ├── exposure.py              # Monitorización de exposición: brechas + Ahmia + pastes + Tor
-    ├── darkweb_monitor.py       # Capa Tor (.onion) usada por exposure.py
+    ├── exposure.py              # Fase 4: brechas · dark web (5 capas) · ransomware · LeakCheck
+    ├── darkweb_monitor.py       # Crawling .onion via Tor (Ahmia/Haystak/Torch + multi-motor)
     └── report.py                # Informes JSON / CSV / Markdown / HTML
 ```
 

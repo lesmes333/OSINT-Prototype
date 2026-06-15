@@ -26,10 +26,19 @@ censys>=2.2.0                # Threat Intel: consultas a la API de Censys
 lxml>=4.9.0                  # Parser HTML más rápido para BeautifulSoup
 pandas>=1.5.0                # Manipulación opcional de datos en informes
 
+playwright>=1.40.0           # Fase 4 (dark web): navegar Ahmia .onion vía Tor con JS
+                             # Después de pip install: ejecuta `playwright install firefox`
+                             # (Chromium puede no descargar en entornos con red restringida)
+
 # =====================================================================
-#  NOTA — herramientas que NO se instalan con pip (ver README):
+#  NOTA — herramientas y servicios que NO se instalan con pip (ver README):
 #    · Docker + wappalyzer-next  → fingerprinting de tecnologías
-#    · Tor (servicio en 127.0.0.1:9050) → monitorización de dark web
+#    · Tor (servicio en 127.0.0.1:9050) → monitorización de dark web vía --tor
 #    · subfinder (binario Go)    → descubrimiento extra de subdominios
 #    · searchsploit / exploitdb  → correlación con exploits de Exploit-DB
+#
+#  APIs de pago opcionales (configurar en .env):
+#    · Pastebin Pro ($8.95/mes)  → PASTEBIN_API_KEY  → feed real-time de pastes
+#    · Intelligence X (pago)    → INTELX_API_KEY     → dark web + pastes históricos
+#    · Have I Been Pwned (pago) → HIBP_API_KEY        → brechas de emails
 # =====================================================================

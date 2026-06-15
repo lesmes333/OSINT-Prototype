@@ -325,12 +325,14 @@ def table_exposure(dw: Dict):
     """Resumen de la monitorización de exposición y filtraciones (Fase 4)."""
     if not isinstance(dw, dict) or dw.get("status") != "success":
         return
-    summary = dw.get("summary", {})
-    breaches = dw.get("breaches", {})
-    ahmia = dw.get("ahmia", {})
-    pastes = dw.get("pastes", {})
+    summary    = dw.get("summary", {})
+    breaches   = dw.get("breaches", {})
+    ahmia      = dw.get("ahmia", {})
+    pastes     = dw.get("pastes", {})
+    ransomware = dw.get("ransomware", {})
     nivel = summary.get("nivel_exposicion", "LOW")
-    nivel_style = {"HIGH": "bold red", "MEDIUM": "yellow", "LOW": "green"}.get(nivel, "dim")
+    nivel_style = {"CRITICAL": "bold white on red", "HIGH": "bold red",
+                   "MEDIUM": "yellow", "LOW": "green"}.get(nivel, "dim")
 
     if _RICH:
         console.print(f"[bold]🛡️  Exposición:[/] nivel ", end="")
@@ -338,28 +340,164 @@ def table_exposure(dw: Dict):
         t = Table(title="Monitorización de exposición y filtraciones", box=box.SIMPLE, header_style="bold magenta")
         t.add_column("Capa", style="cyan")
         t.add_column("Hallazgos", style="white")
-        t.add_row("Brechas de datos",
-                  f"{breaches.get('compromised_emails', 0)} email(s) comprometido(s) "
-                  f"de {breaches.get('checked_emails', 0)} revisados")
-        t.add_row("Índice dark web (Ahmia)", f"{ahmia.get('total', 0)} mención(es) en .onion")
-        t.add_row("Paste sites (PSBDMP)", f"{pastes.get('total', 0)} paste(s)")
+
+        # Capa 1: brechas de datos
+        db = breaches.get("domain_breaches", {})
+        db_count = db.get("count", 0)
+        lc = [r for r in breaches.get("leakcheck", []) if not r.get("error")]
+        dh = breaches.get("dehashed", [])
+        breach_txt = f"{breaches.get('compromised_emails', 0)} email(s) comprometido(s) de {breaches.get('checked_emails', 0)} revisados"
+        if db_count:
+            breach_txt += f" · {db_count} brechas a nivel dominio"
+        if lc:
+            breach_txt += f" · LeakCheck:{len(lc)} credenciales"
+        if dh:
+            breach_txt += f" · Dehashed:{len(dh)} registros"
+        t.add_row("1 · Brechas de datos", breach_txt)
+
+        # Capa 2: dark web index
+        ahmia_status = ahmia.get("status", "")
+        if ahmia_status == "requires_tor_or_intelx":
+            t.add_row("2 · Índice dark web", "[yellow]Tor no activo — inicia con `sudo systemctl start tor`[/yellow]")
+        else:
+            metodo = ahmia.get("method", "")
+            total_onion = ahmia.get("total", 0)
+            onion_txt = (f"{total_onion} mención(es) en .onion [{metodo}]" if total_onion
+                         else f"Sin menciones en dark web (buena señal) [{metodo}]")
+            t.add_row("2 · Índice dark web", onion_txt)
+
+        # Capa 3: leaks en fuentes abiertas
+        urlscan_n  = pastes.get("urlscan_count", 0)
+        github_n   = pastes.get("github_total", 0)
+        pastebin_n = pastes.get("pastebin_count", 0)
+        intelx_n   = pastes.get("intelx_count", 0)
+        leaks_txt  = f"URLScan:{urlscan_n} | GitHub:{github_n}"
+        if pastebin_n:
+            leaks_txt += f" | Pastebin:{pastebin_n}"
+        if intelx_n:
+            leaks_txt += f" | IntelX:{intelx_n}"
+        t.add_row("3 · Leaks fuentes abiertas", leaks_txt)
+
+        # Capa 4: ransomware & ciberataques
+        rw_nivel = ransomware.get("nivel_riesgo", "LOW")
+        rw_incidents = ransomware.get("total_incidents", 0)
+        maltiverse_cls = ransomware.get("maltiverse", {}).get("clasificacion", "neutral")
+        rw_style = {"CRITICAL": "bold red", "HIGH": "bold red",
+                    "MEDIUM": "yellow", "LOW": "green"}.get(rw_nivel, "dim")
+        if rw_incidents > 0:
+            rw_txt = Text(f"⚠️  {rw_incidents} incidente(s) encontrado(s) — RIESGO {rw_nivel}", style="bold red")
+        else:
+            rw_txt = Text(f"Sin incidentes de ransomware · Maltiverse: {maltiverse_cls}", style="green")
+        t.add_row("4 · Ransomware & Ciberataques", rw_txt)
+
         if dw.get("tor", {}).get("status") == "success":
-            t.add_row("Tor (.onion crawl)", f"{len(dw.get('analyzed_threats', []))} analizado(s)")
+            t.add_row("5 · Tor (.onion crawl)", f"{len(dw.get('analyzed_threats', []))} analizado(s)")
         console.print(t)
+
+        # Aviso de dark web si requiere configuración adicional
+        if ahmia_status == "requires_tor_or_intelx":
+            msg = ahmia.get("message", "")
+            if msg:
+                console.print(f"[dim]  ℹ  {msg[:180]}[/dim]")
+
+        # Alerta de ransomware (si se encontraron incidentes)
+        victims  = ransomware.get("victims", [])
+        attacks  = ransomware.get("cyberattacks", [])
+        rl_hits  = ransomware.get("ransomlook", [])
+        if victims or attacks or rl_hits:
+            rt = Table(title="⚠️ ALERTA: Incidentes de ransomware / ciberataques detectados",
+                       box=box.SIMPLE_HEAVY, header_style="bold red")
+            rt.add_column("Fuente", style="yellow")
+            rt.add_column("Grupo", style="red")
+            rt.add_column("Detalle", style="white")
+            rt.add_column("Fecha", style="dim")
+            for v in victims[:5]:
+                rt.add_row("ransomware.live",
+                           v.get("grupo", ""),
+                           f"Víctima: {v.get('victima', '')[:60]} | {v.get('sitio', '')}",
+                           v.get("publicado", ""))
+            for a in attacks[:5]:
+                rt.add_row("ransomware.live/attacks",
+                           "",
+                           f"{a.get('titulo', '')[:60]} | {a.get('dominio', '')}",
+                           a.get("fecha", ""))
+            for h in rl_hits[:5]:
+                rt.add_row("ransomlook.io", h.get("grupo", ""), h.get("victima", "")[:60], h.get("fecha", ""))
+            console.print(rt)
+
+        # Muestra una muestra de menciones en GitHub (posibles fugas de configuración)
+        gh_sample = pastes.get("github_sample", [])
+        if gh_sample:
+            gt = Table(title="🔍 Menciones en repos públicos (GitHub)", box=box.SIMPLE,
+                       header_style="bold yellow")
+            gt.add_column("Repositorio", style="cyan")
+            gt.add_column("Archivo", style="white")
+            for item in gh_sample[:8]:
+                gt.add_row(item.get("repo", ""), item.get("file", ""))
+            if github_n > len(gh_sample):
+                gt.add_row("[dim]...[/dim]", f"[dim]+{github_n - len(gh_sample)} más[/dim]")
+            console.print(gt)
 
         # Detalle de emails comprometidos (lo más accionable)
         comprometidos = [r for r in breaches.get("results", []) if r.get("found")]
         if comprometidos:
-            bt = Table(title="📧 Correos en filtraciones", box=box.SIMPLE, header_style="bold red")
+            bt = Table(title="📧 Correos en filtraciones (XposedOrNot)", box=box.SIMPLE, header_style="bold red")
             bt.add_column("Email", style="yellow")
             bt.add_column("Brechas", style="white")
             for r in comprometidos[:15]:
                 bt.add_row(r.get("email", ""), ", ".join(r.get("breaches", [])[:6]))
             console.print(bt)
+
+        # XposedOrNot domain breach (brechas a nivel de dominio)
+        db = breaches.get("domain_breaches", {})
+        db_breaches = db.get("breaches", [])
+        if db_breaches:
+            dt = Table(title=f"🌐 Brechas del dominio — {db.get('count',0)} evento(s) (XposedOrNot domain)",
+                       box=box.SIMPLE, header_style="bold red")
+            dt.add_column("Brecha / Fuente", style="yellow")
+            for b in db_breaches[:20]:
+                dt.add_row(str(b)[:100])
+            console.print(dt)
+
+        # LeakCheck: credenciales filtradas por dominio
+        lc_hits = [r for r in breaches.get("leakcheck", []) if not r.get("error")]
+        if lc_hits:
+            lt = Table(title=f"🔑 Credenciales filtradas — LeakCheck ({len(lc_hits)} registros)",
+                       box=box.SIMPLE, header_style="bold red")
+            lt.add_column("Email / Usuario", style="yellow")
+            lt.add_column("Fuente(s) de brecha", style="white")
+            for r in lc_hits[:20]:
+                ident = r.get("email") or r.get("username", "")
+                sources = ", ".join(r.get("source", [])[:3]) if r.get("source") else "—"
+                lt.add_row(ident, sources)
+            console.print(lt)
+        elif breaches.get("leakcheck_error"):
+            err = breaches["leakcheck_error"]
+            if err.get("error") == "rate_limit":
+                console.print(f"[dim]  ℹ  LeakCheck: {err.get('message','')}[/dim]")
+
+        # Dehashed: la BD más completa
+        dh_hits = breaches.get("dehashed", [])
+        if dh_hits:
+            dht = Table(title=f"💀 Credenciales — Dehashed ({len(dh_hits)} registros)",
+                        box=box.SIMPLE, header_style="bold red")
+            dht.add_column("Email", style="yellow")
+            dht.add_column("Usuario", style="white")
+            dht.add_column("BD / Fuente", style="dim")
+            for r in dh_hits[:20]:
+                dht.add_row(r.get("email",""), r.get("username",""), r.get("database",""))
+            console.print(dht)
     else:
+        ahmia_txt = (f"{ahmia.get('total', 0)} .onion"
+                     if ahmia.get("status") != "requires_tor_or_intelx"
+                     else "dark web: activa Tor")
+        rw_total = ransomware.get("total_incidents", 0)
         _plain(f"\nExposición: nivel {nivel} | "
                f"{breaches.get('compromised_emails', 0)} emails comprometidos | "
-               f"{ahmia.get('total', 0)} .onion | {pastes.get('total', 0)} pastes")
+               f"{ahmia_txt} | "
+               f"URLScan:{pastes.get('urlscan_count',0)} "
+               f"GitHub:{pastes.get('github_total',0)} | "
+               f"Ransomware:{rw_total} incidentes")
 
 
 def table_darkweb(dw: Dict):
