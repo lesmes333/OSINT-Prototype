@@ -146,7 +146,7 @@ Cada una habilita **una fase concreta**. Instala solo las que necesites. La herr
 |-------------|----------|------------------|------------------------|---------|
 | **subfinder** | Más subdominios | `brew install subfinder` | `sudo apt install subfinder` *(o vía Go, abajo)* | `go install` (abajo) o [release](https://github.com/projectdiscovery/subfinder/releases) |
 | **Docker** | Fingerprinting (Wappalyzer) | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | `sudo apt install docker.io` + `sudo usermod -aG docker $USER` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
-| **searchsploit** | Exploits (Exploit-DB) | `brew install exploitdb` | `sudo apt install exploitdb` | [exploitdb en WSL](https://gitlab.com/exploit-database/exploitdb) |
+| **searchsploit** | Exploits (Exploit-DB) | `brew install exploitdb` | clonar desde GitLab (abajo) | [exploitdb en WSL](https://gitlab.com/exploit-database/exploitdb) |
 | **Tor** | Dark web | `brew install tor` + `brew services start tor` | `sudo apt install tor` + `sudo systemctl start tor` | [Tor Expert Bundle](https://www.torproject.org/download/tor/) |
 
 > **subfinder vía Go** (si no está en tu gestor de paquetes):
@@ -154,6 +154,13 @@ Cada una habilita **una fase concreta**. Instala solo las que necesites. La herr
 > go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 > ```
 > Asegúrate de que `~/go/bin` está en tu `PATH`.
+
+> **searchsploit en Ubuntu/Debian:** el paquete `exploitdb` de `apt` **no existe** en Ubuntu (solo en Kali), y el repo de GitHub está vacío. Clónalo desde **GitLab** (su ubicación oficial) y enlázalo al PATH:
+> ```bash
+> sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb
+> sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
+> searchsploit apache        # comprobar que funciona
+> ```
 
 #### 🔍 Configurar el fingerprinting (Docker + wappalyzer-next)
 
@@ -260,7 +267,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 |----------|----------|---------------|
 | Shodan | `SHODAN_API_KEY` | https://account.shodan.io |
 | VirusTotal | `VIRUSTOTAL_API_KEY` | https://www.virustotal.com/gui/my-apikey |
-| Censys | `CENSYS_API_ID` / `CENSYS_API_SECRET` | https://search.censys.io/account/api |
+| Censys ⚠️ | `CENSYS_API_ID` / `CENSYS_API_SECRET` | https://search.censys.io/account/api — ver nota abajo |
 | AlienVault OTX | `ALIENVAULT_API_KEY` | https://otx.alienvault.com/settings |
 | Hunter.io | `HUNTER_API_KEY` | https://hunter.io/api-keys |
 | IPinfo | `IPINFO_API_KEY` | https://ipinfo.io/account/token |
@@ -269,6 +276,8 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | NVD | `NVD_API_KEY` | https://nvd.nist.gov/developers/request-an-api-key |
 | GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens |
 | GitLab | `GITLAB_TOKEN` | https://gitlab.com/-/profile/personal_access_tokens |
+
+> ⚠️ **Nota sobre Censys:** esta herramienta usa la **API antigua de Censys Search** (par `CENSYS_API_ID` + `CENSYS_API_SECRET`). Los nuevos **Personal Access Tokens** del *Censys Platform* **no son compatibles** con esta integración, y el endpoint de certificados que usa el código está retirado por Censys. En la práctica Censys suele fallar aunque pongas credenciales: **es opcional, déjalo vacío sin problema** (el escaneo continúa y usa el resto de fuentes).
 
 ---
 
@@ -279,7 +288,8 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | `Fingerprinting omitido: Docker no disponible` | Arranca Docker Desktop y construye wappalyzer-next (ver instalación). |
 | `Tor no está corriendo` | `brew services start tor` o `systemctl start tor`. Comprueba el puerto 9050. |
 | Pocas API OK en el diagnóstico | Normal sin claves; añádelas en `.env`. El descubrimiento funciona igual. |
-| `searchsploit` no encontrado | `brew install exploitdb` / `apt install exploitdb` (opcional). |
+| `searchsploit` no encontrado (Ubuntu) | `apt install exploitdb` no existe en Ubuntu. Clónalo desde GitLab: `sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit`. En macOS: `brew install exploitdb`. |
+| Censys siempre falla | Normal: usa una API antigua de Censys ya retirada y los nuevos *Personal Access Tokens* no sirven. Déjalo vacío (es opcional). |
 | Registros DNS vacíos | Tu red/resolver bloquea el puerto 53 saliente; prueba en otra red. |
 | Búsqueda de CVEs lenta | Sin `NVD_API_KEY` el límite es estricto (pausas de 6s). Añade la clave para acelerar. |
 
