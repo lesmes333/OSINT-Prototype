@@ -289,7 +289,7 @@ def main(argv=None):
 
     interactive = sys.stdin.isatty() and not args.yes and not args.all
     do_fp = True if args.all else decide_phase(
-        args.fingerprint, interactive, "   ¿Fingerprinting + CVEs + INCIBE-CERT? (s/n): ", default=False
+        args.fingerprint, interactive, "   ¿Fingerprinting + CVEs + INCIBE-CERT? (s/n): ", default=True
     )
     do_dw = True if args.all else decide_phase(
         args.darkweb, interactive, "   ¿Búsqueda en dark web? (s/n): ", default=False

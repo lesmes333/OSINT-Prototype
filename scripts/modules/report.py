@@ -72,6 +72,7 @@ footer b{{color:var(--accent)}}
 <table><thead><tr><th>#</th><th>Subdominio</th><th>Estado</th><th>Fuentes</th></tr></thead><tbody>{sub_rows}</tbody></table></section>
 <section><h2>🔍 Registros DNS</h2><table><tbody>{dns_rows}</tbody></table></section>
 <section><h2>🏢 WHOIS</h2><table><tbody>{whois_rows}</tbody></table></section>
+{ti_section}
 <section><h2>🧬 Tecnologías detectadas</h2><table><thead><tr><th>URL</th><th>Tecnologías</th></tr></thead><tbody>{tech_rows}</tbody></table></section>
 {cve_section}
 {ew_section}
@@ -1171,6 +1172,91 @@ class ReportGenerator:
             for k, v in whois.items() if k != 'error'
         )
 
+        # ---- Threat Intelligence (Shodan, VirusTotal, AbuseIPDB, AlienVault, Hunter) ----
+        ti = threat_data  # alias
+        ti_rows = ""
+
+        # VirusTotal
+        vt = ti.get('virustotal', {})
+        if vt.get('status') == 'ok':
+            stats = vt.get('last_analysis_stats', {})
+            mal   = stats.get('malicious', 0)
+            sus   = stats.get('suspicious', 0)
+            harm  = stats.get('harmless', 0)
+            rep   = vt.get('reputation', 0)
+            vt_badge = badge(f"{mal} malicioso(s)", "crit") if mal > 0 else badge("limpio", "low")
+            ti_rows += (
+                f"<tr><td><b>VirusTotal</b></td>"
+                f"<td>{vt_badge} &nbsp; "
+                f"{badge(f'{sus} sospechoso(s)', 'high') if sus else ''} "
+                f"Reputación: <b>{escape(str(rep))}</b> · "
+                f"{harm} sin detecciones</td></tr>"
+            )
+
+        # Shodan / InternetDB
+        sh = ti.get('shodan', {})
+        if sh.get('status') == 'ok':
+            ports = sh.get('ports', [])
+            vulns = sh.get('vulnerabilities', [])
+            hosts = sh.get('hostnames', [])
+            sh_ports = ", ".join(str(p) for p in ports[:20]) or "ninguno"
+            sh_vulns = "".join(badge(v, "crit") + " " for v in vulns[:8]) if vulns else badge("0 CVEs conocidos", "low")
+            ti_rows += (
+                f"<tr><td><b>Shodan / InternetDB</b></td>"
+                f"<td>Puertos abiertos: <code>{escape(sh_ports)}</code> · "
+                f"CVEs expuestos: {sh_vulns}"
+                + (f" · Hostnames: {escape(', '.join(hosts[:3]))}" if hosts else "")
+                + "</td></tr>"
+            )
+
+        # AbuseIPDB
+        ab = ti.get('abuseipdb', {})
+        if ab.get('status') == 'ok':
+            score = ab.get('abuse_score', 0)
+            reports = ab.get('total_reports', 0)
+            country = ab.get('country', '')
+            ab_badge = badge(f"Score: {score}%", "crit" if score > 25 else ("high" if score > 5 else "low"))
+            ti_rows += (
+                f"<tr><td><b>AbuseIPDB</b></td>"
+                f"<td>{ab_badge} · {escape(str(reports))} reporte(s) · País: {escape(country)}</td></tr>"
+            )
+
+        # AlienVault OTX
+        av = ti.get('alienvault', {})
+        if av.get('status') == 'ok':
+            pulses = av.get('pulse_count', 0)
+            rep_av = av.get('reputation', 'N/A')
+            av_badge = badge(f"{pulses} pulse(s)", "crit" if pulses > 0 else "low")
+            ti_rows += (
+                f"<tr><td><b>AlienVault OTX</b></td>"
+                f"<td>{av_badge} · Reputación: {escape(str(rep_av))}</td></tr>"
+            )
+
+        # Hunter.io
+        hu = ti.get('hunter', {})
+        if hu.get('status') == 'ok':
+            total_emails = hu.get('total_emails', 0)
+            email_list   = [e.get('value', '') for e in hu.get('emails', [])[:8]]
+            hu_badge = badge(f"{total_emails} email(s)", "med" if total_emails > 0 else "low")
+            emails_str = ", ".join(f"<code>{escape(e)}</code>" for e in email_list) or "—"
+            ti_rows += (
+                f"<tr><td><b>Hunter.io</b></td>"
+                f"<td>{hu_badge} descubiertos públicamente: {emails_str}</td></tr>"
+            )
+
+        # URLScan
+        us = ti.get('urlscan', {})
+        if us.get('status') == 'ok':
+            total_us = us.get('total', 0)
+            us_badge = badge(f"{total_us} escaneo(s) histórico(s)", "med" if total_us > 10 else "low")
+            ti_rows += f"<tr><td><b>urlscan.io</b></td><td>{us_badge}</td></tr>"
+
+        ti_section = (
+            f"<section><h2>🛰️ Threat Intelligence</h2>"
+            f"<table><thead><tr><th>Fuente</th><th>Resultado</th></tr></thead>"
+            f"<tbody>{ti_rows}</tbody></table></section>"
+        ) if ti_rows else ""
+
         html = _HTML_TEMPLATE.format(
             domain=escape(domain),
             ip=escape(str(threat_data.get('ip_address', 'N/D'))),
@@ -1182,6 +1268,7 @@ class ReportGenerator:
             sub_total=discovery_data.get('total_subdomains', 0),
             dns_rows=dns_rows or "<tr><td colspan=2 class='muted'>Sin registros</td></tr>",
             whois_rows=whois_html or "<tr><td colspan=2 class='muted'>No disponible</td></tr>",
+            ti_section=ti_section,
             tech_rows=tech_rows or "<tr><td colspan=2 class='muted'>Sin datos (fingerprinting omitido o sin resultados)</td></tr>",
             cve_section=cve_section,
             ew_section=ew_section,
