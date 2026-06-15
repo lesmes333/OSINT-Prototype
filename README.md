@@ -277,11 +277,11 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens |
 | GitLab | `GITLAB_TOKEN` | https://gitlab.com/-/profile/personal_access_tokens |
 
-> ℹ️ **Nota sobre Censys (nuevo Platform API):** la herramienta usa el **Censys Platform** (https://platform.censys.io), que requiere **dos valores**:
-> - `CENSYS_PAT` → tu **Personal Access Token** (*Settings → Personal Access Tokens → Create*).
-> - `CENSYS_ORG_ID` → tu **Organization ID** (en los ajustes de tu organización/cuenta del Platform).
+> ℹ️ **Nota sobre Censys (nuevo Platform API):** la herramienta usa el **Censys Platform** (https://platform.censys.io):
+> - `CENSYS_PAT` → tu **Personal Access Token** (icono de usuario → *API Access* → *Create New Token*; la cadena larga se muestra **solo al crearlo**).
+> - `CENSYS_ORG_ID` → **opcional**. El *Organization ID* solo existe en cuentas **de pago** (Starter/Enterprise), en *My Account → Personal Access Tokens → "Current Organization"*. En el **Free Tier no existe**: déjalo vacío.
 >
-> La API antigua (`CENSYS_API_ID`/`CENSYS_API_SECRET` de `search.censys.io`) está retirada y **ya no funciona**. Sigue siendo **opcional**: si lo dejas vacío, el escaneo continúa con el resto de fuentes.
+> ⚠️ **Limitación del Free Tier:** las cuentas gratuitas de Censys **solo permiten endpoints de lookup, no de búsqueda**, que es el que usa esta herramienta. Con cuenta gratuita Censys devolverá normalmente 403. La API antigua (`CENSYS_API_ID`/`CENSYS_API_SECRET`) está retirada. Censys es **opcional**: si falla, el escaneo continúa con el resto de fuentes.
 
 ---
 

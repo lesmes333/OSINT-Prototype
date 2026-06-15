@@ -115,16 +115,18 @@ class ThreatIntel:
         un Personal Access Token + Organization ID. Busca certificados cuyo SAN
         incluya el dominio. La API antigua (api_id/api_secret) está retirada.
         """
-        if not self.censys_pat or not self.censys_org_id:
-            return {"status": "no_api_key", "message": "Configurar CENSYS_PAT y CENSYS_ORG_ID en .env (Censys Platform)"}
+        if not self.censys_pat:
+            return {"status": "no_api_key", "message": "Configurar CENSYS_PAT en .env (Censys Platform)"}
         print(f"[*] Censys: consultando certificados de {self.domain}")
         url = "https://api.platform.censys.io/v3/global/search/query"
         headers = {
             "Authorization": f"Bearer {self.censys_pat}",
-            "X-Organization-ID": self.censys_org_id,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        # El Organization ID solo existe en cuentas de pago; se envía si está configurado.
+        if self.censys_org_id:
+            headers["X-Organization-ID"] = self.censys_org_id
         body = {"query": f'cert.names="{self.domain}"', "page_size": 10}
         try:
             response = self.session.post(url, headers=headers, json=body, timeout=20)
@@ -156,9 +158,9 @@ class ThreatIntel:
                     certificates.append({"names": names, "fingerprint": str(fp)[:16]})
                 return {"status": "ok", "total_certificates": len(certificates), "certificates": certificates[:10]}
             elif response.status_code in (401, 403):
-                print("   ⚠️ Censys: Token inválido, sin permisos o Organization ID incorrecto.")
+                print("   ⚠️ Censys: Token inválido o sin permisos (el plan gratuito no permite búsquedas).")
                 return {"status": "error", "error_type": "invalid_key",
-                        "message": "Token/Org ID inválido. Revisa CENSYS_PAT y CENSYS_ORG_ID (platform.censys.io)"}
+                        "message": "401/403: revisa CENSYS_PAT. Nota: el Free Tier de Censys no permite el endpoint de búsqueda (requiere plan de pago)"}
             elif response.status_code == 429:
                 print("   ⚠️ Censys: Cuota agotada.")
                 return {"status": "error", "error_type": "quota_exceeded",
