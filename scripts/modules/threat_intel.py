@@ -80,31 +80,71 @@ class ThreatIntel:
 
     # ---------- API 2: SHODAN ----------
     def query_shodan(self) -> Dict:
-        if not self.shodan_api_key:
-            return {"status": "no_api_key", "message": "Configurar SHODAN_API_KEY en .env"}
+        """
+        Información del host en Shodan.
+
+        Estrategia:
+          1. Si hay clave, intenta el endpoint completo /shodan/host/{ip}
+             (datos más ricos, pero requiere plan de pago).
+          2. Si no hay clave o el plan no lo permite (403), cae a InternetDB
+             (https://internetdb.shodan.io), que es GRATIS y sin clave.
+        Así Shodan funciona también en cuentas gratuitas.
+        """
         if not self.ip_address:
             return {"status": "error", "message": "No se pudo resolver IP"}
         print(f"[*] Shodan: consultando IP {self.ip_address}")
-        url = f"https://api.shodan.io/shodan/host/{self.ip_address}?key={self.shodan_api_key}"
+
+        # --- 1) Endpoint completo (solo si hay clave) ---
+        if self.shodan_api_key:
+            url = f"https://api.shodan.io/shodan/host/{self.ip_address}?key={self.shodan_api_key}"
+            try:
+                response = self.session.get(url, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "status": "ok",
+                        "source": "shodan",
+                        "ip": self.ip_address,
+                        "ports": data.get("ports", []),
+                        "hostnames": data.get("hostnames", []),
+                        "vulnerabilities": data.get("vulnerabilities", []),
+                        "tags": data.get("tags", []),
+                    }
+                elif response.status_code == 401:
+                    print("   ⚠️ Shodan: Clave API inválida.")
+                    return {"status": "error", "error_type": "invalid_key",
+                            "message": "Clave API de Shodan inválida. Revísala en account.shodan.io"}
+                elif response.status_code == 403:
+                    # Plan gratuito (OSS): el endpoint de host requiere membresía.
+                    # Continuamos con InternetDB en lugar de fallar.
+                    print("   ℹ️ Shodan: el plan gratuito no permite host lookup; usando InternetDB.")
+                elif response.status_code == 429:
+                    print("   ⚠️ Shodan: Cuota agotada. Espera unos minutos.")
+                    return {"status": "error", "error_type": "quota_exceeded",
+                            "message": "Cuota de Shodan agotada. Espera o actualiza tu plan"}
+            except Exception as e:
+                print(f"   ℹ️ Shodan: error en host lookup ({e}); usando InternetDB.")
+
+        # --- 2) InternetDB (gratis, sin clave) ---
         try:
-            response = self.session.get(url, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
+            r = self.session.get(f"https://internetdb.shodan.io/{self.ip_address}", timeout=15)
+            if r.status_code == 200:
+                data = r.json()
                 return {
                     "status": "ok",
+                    "source": "internetdb",
                     "ip": self.ip_address,
-                    "ports": data.get('ports', []),
-                    "hostnames": data.get('hostnames', []),
-                    "vulnerabilities": data.get('vulnerabilities', []),
-                    "tags": data.get('tags', [])
+                    "ports": data.get("ports", []),
+                    "hostnames": data.get("hostnames", []),
+                    "vulnerabilities": data.get("vulns", []),
+                    "cpes": data.get("cpes", []),
+                    "tags": data.get("tags", []),
                 }
-            elif response.status_code in (401, 403):
-                print("   ⚠️ Shodan: Clave API inválida o no autorizada.")
-                return {"status": "error", "error_type": "invalid_key", "message": "Clave API inválida. Renueva tu clave en shodan.io"}
-            elif response.status_code == 429:
-                print("   ⚠️ Shodan: Cuota agotada. Espera unos minutos.")
-                return {"status": "error", "error_type": "quota_exceeded", "message": "Cuota de Shodan agotada. Espera o actualiza tu plan"}
-            return {"status": "error", "code": response.status_code}
+            elif r.status_code == 404:
+                return {"status": "ok", "source": "internetdb", "ip": self.ip_address,
+                        "ports": [], "hostnames": [], "vulnerabilities": [], "tags": [],
+                        "message": "Shodan no tiene datos escaneados de esta IP"}
+            return {"status": "error", "code": r.status_code, "message": "InternetDB no disponible"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 

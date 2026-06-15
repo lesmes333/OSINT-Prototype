@@ -311,6 +311,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | Pocas API OK en el diagnóstico | Normal sin claves; añádelas en `.env`. El descubrimiento funciona igual. |
 | `searchsploit` no encontrado (Ubuntu) | `apt install exploitdb` no existe en Ubuntu. Clónalo desde GitLab: `sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit`. En macOS: `brew install exploitdb`. |
 | Censys da 401/403 | Revisa que `CENSYS_PAT` y `CENSYS_ORG_ID` sean correctos (Platform API en platform.censys.io). El Organization ID es obligatorio además del token. |
+| Shodan no devuelve puertos | El plan **gratuito (OSS)** de Shodan no permite el host lookup por API; la herramienta usa **InternetDB** (gratis, sin clave) como alternativa. Si igual sale vacío, es que **Shodan no tiene datos de esa IP** (no es un error). Con clave de pago se usa el endpoint completo automáticamente. |
 | Registros DNS vacíos | Tu red/resolver bloquea el puerto 53 saliente; prueba en otra red. |
 | Búsqueda de CVEs lenta | Sin `NVD_API_KEY` el límite es estricto (pausas de 6s). Añade la clave para acelerar. |
 
