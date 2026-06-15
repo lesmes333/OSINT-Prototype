@@ -27,8 +27,9 @@ class ThreatIntel:
         self.requests = self.session
 
         self.shodan_api_key = os.getenv("SHODAN_API_KEY", "")
-        self.censys_api_id = os.getenv("CENSYS_API_ID", "")
-        self.censys_api_secret = os.getenv("CENSYS_API_SECRET", "")
+        # Censys Platform (nuevo): Personal Access Token + Organization ID.
+        self.censys_pat = os.getenv("CENSYS_PAT", "")
+        self.censys_org_id = os.getenv("CENSYS_ORG_ID", "")
         self.virustotal_api_key = os.getenv("VIRUSTOTAL_API_KEY", "")
         self.alienvault_api_key = os.getenv("ALIENVAULT_API_KEY", "")
         self.hunter_api_key = os.getenv("HUNTER_API_KEY", "")
@@ -107,34 +108,63 @@ class ThreatIntel:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    # ---------- API 3: CENSYS ----------
+    # ---------- API 3: CENSYS (Platform API + Personal Access Token) ----------
     def query_censys(self) -> Dict:
-        if not self.censys_api_id or not self.censys_api_secret:
-            return {"status": "no_api_key", "message": "Configurar CENSYS_API_ID y CENSYS_API_SECRET en .env"}
+        """
+        Consulta el nuevo Censys Platform API (https://platform.censys.io) usando
+        un Personal Access Token + Organization ID. Busca certificados cuyo SAN
+        incluya el dominio. La API antigua (api_id/api_secret) está retirada.
+        """
+        if not self.censys_pat or not self.censys_org_id:
+            return {"status": "no_api_key", "message": "Configurar CENSYS_PAT y CENSYS_ORG_ID en .env (Censys Platform)"}
         print(f"[*] Censys: consultando certificados de {self.domain}")
+        url = "https://api.platform.censys.io/v3/global/search/query"
+        headers = {
+            "Authorization": f"Bearer {self.censys_pat}",
+            "X-Organization-ID": self.censys_org_id,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        body = {"query": f'cert.names="{self.domain}"', "page_size": 10}
         try:
-            from censys.search import CensysCertificates
-            censys = CensysCertificates(api_id=self.censys_api_id, api_secret=self.censys_api_secret)
-            query = f"parsed.names: {self.domain}"
-            results = censys.search(query, per_page=10)
-            certificates = []
-            # CORRECCIÓN: results es un iterador, no una función
-            for cert in results:
-                certificates.append({
-                    "names": cert.get('parsed', {}).get('names', []),
-                    "fingerprint": cert.get('fingerprint', '')[:16]
-                })
-            return {"status": "ok", "total_certificates": len(certificates), "certificates": certificates[:10]}
-        except ImportError:
-            return {"status": "error", "message": "Instalar: pip install censys"}
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "invalid" in error_msg or "unauthorized" in error_msg or "403" in error_msg:
-                print("   ⚠️ Censys: Clave API inválida o no autorizada.")
-                return {"status": "error", "error_type": "invalid_key", "message": "Clave API inválida. Renueva tus credenciales en censys.io"}
-            elif "limit" in error_msg or "429" in error_msg:
+            response = self.session.post(url, headers=headers, json=body, timeout=20)
+            if response.status_code == 200:
+                data = response.json()
+                # La respuesta del Platform anida los resultados; extraemos de forma
+                # defensiva porque la estructura puede variar según el dataset.
+                hits = (
+                    data.get("result", {}).get("hits")
+                    or data.get("hits")
+                    or data.get("result", {}).get("results")
+                    or []
+                )
+                certificates = []
+                for hit in hits:
+                    cert = hit.get("cert", hit) if isinstance(hit, dict) else {}
+                    names = (
+                        cert.get("names")
+                        or cert.get("parsed", {}).get("names")
+                        or hit.get("names")
+                        or []
+                    )
+                    fp = (
+                        cert.get("fingerprint_sha256")
+                        or cert.get("fingerprint")
+                        or hit.get("fingerprint_sha256")
+                        or ""
+                    )
+                    certificates.append({"names": names, "fingerprint": str(fp)[:16]})
+                return {"status": "ok", "total_certificates": len(certificates), "certificates": certificates[:10]}
+            elif response.status_code in (401, 403):
+                print("   ⚠️ Censys: Token inválido, sin permisos o Organization ID incorrecto.")
+                return {"status": "error", "error_type": "invalid_key",
+                        "message": "Token/Org ID inválido. Revisa CENSYS_PAT y CENSYS_ORG_ID (platform.censys.io)"}
+            elif response.status_code == 429:
                 print("   ⚠️ Censys: Cuota agotada.")
-                return {"status": "error", "error_type": "quota_exceeded", "message": "Cuota de Censys agotada. Espera o actualiza tu plan"}
+                return {"status": "error", "error_type": "quota_exceeded",
+                        "message": "Cuota de Censys agotada. Espera o actualiza tu plan"}
+            return {"status": "error", "code": response.status_code, "message": response.text[:200]}
+        except Exception as e:
             return {"status": "error", "message": str(e)}
 
     # ---------- API 4: ALIENVAULT OTX ----------

@@ -267,7 +267,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 |----------|----------|---------------|
 | Shodan | `SHODAN_API_KEY` | https://account.shodan.io |
 | VirusTotal | `VIRUSTOTAL_API_KEY` | https://www.virustotal.com/gui/my-apikey |
-| Censys ⚠️ | `CENSYS_API_ID` / `CENSYS_API_SECRET` | https://search.censys.io/account/api — ver nota abajo |
+| Censys | `CENSYS_PAT` / `CENSYS_ORG_ID` | https://platform.censys.io — ver nota abajo |
 | AlienVault OTX | `ALIENVAULT_API_KEY` | https://otx.alienvault.com/settings |
 | Hunter.io | `HUNTER_API_KEY` | https://hunter.io/api-keys |
 | IPinfo | `IPINFO_API_KEY` | https://ipinfo.io/account/token |
@@ -277,7 +277,11 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens |
 | GitLab | `GITLAB_TOKEN` | https://gitlab.com/-/profile/personal_access_tokens |
 
-> ⚠️ **Nota sobre Censys:** esta herramienta usa la **API antigua de Censys Search** (par `CENSYS_API_ID` + `CENSYS_API_SECRET`). Los nuevos **Personal Access Tokens** del *Censys Platform* **no son compatibles** con esta integración, y el endpoint de certificados que usa el código está retirado por Censys. En la práctica Censys suele fallar aunque pongas credenciales: **es opcional, déjalo vacío sin problema** (el escaneo continúa y usa el resto de fuentes).
+> ℹ️ **Nota sobre Censys (nuevo Platform API):** la herramienta usa el **Censys Platform** (https://platform.censys.io), que requiere **dos valores**:
+> - `CENSYS_PAT` → tu **Personal Access Token** (*Settings → Personal Access Tokens → Create*).
+> - `CENSYS_ORG_ID` → tu **Organization ID** (en los ajustes de tu organización/cuenta del Platform).
+>
+> La API antigua (`CENSYS_API_ID`/`CENSYS_API_SECRET` de `search.censys.io`) está retirada y **ya no funciona**. Sigue siendo **opcional**: si lo dejas vacío, el escaneo continúa con el resto de fuentes.
 
 ---
 
@@ -289,7 +293,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | `Tor no está corriendo` | `brew services start tor` o `systemctl start tor`. Comprueba el puerto 9050. |
 | Pocas API OK en el diagnóstico | Normal sin claves; añádelas en `.env`. El descubrimiento funciona igual. |
 | `searchsploit` no encontrado (Ubuntu) | `apt install exploitdb` no existe en Ubuntu. Clónalo desde GitLab: `sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit`. En macOS: `brew install exploitdb`. |
-| Censys siempre falla | Normal: usa una API antigua de Censys ya retirada y los nuevos *Personal Access Tokens* no sirven. Déjalo vacío (es opcional). |
+| Censys da 401/403 | Revisa que `CENSYS_PAT` y `CENSYS_ORG_ID` sean correctos (Platform API en platform.censys.io). El Organization ID es obligatorio además del token. |
 | Registros DNS vacíos | Tu red/resolver bloquea el puerto 53 saliente; prueba en otra red. |
 | Búsqueda de CVEs lenta | Sin `NVD_API_KEY` el límite es estricto (pausas de 6s). Añade la clave para acelerar. |
 

@@ -29,7 +29,7 @@ log = get_logger()
 API_META = {
     "virustotal": {"name": "VirusTotal", "env": ["VIRUSTOTAL_API_KEY"], "renew": "https://www.virustotal.com/gui/my-apikey"},
     "shodan": {"name": "Shodan", "env": ["SHODAN_API_KEY"], "renew": "https://account.shodan.io"},
-    "censys": {"name": "Censys", "env": ["CENSYS_API_ID", "CENSYS_API_SECRET"], "renew": "https://search.censys.io/account/api"},
+    "censys": {"name": "Censys", "env": ["CENSYS_PAT", "CENSYS_ORG_ID"], "renew": "https://platform.censys.io"},
     "alienvault": {"name": "AlienVault OTX", "env": ["ALIENVAULT_API_KEY"], "renew": "https://otx.alienvault.com/settings"},
     "ipinfo": {"name": "IPinfo", "env": ["IPINFO_API_KEY"], "renew": "https://ipinfo.io/account/token"},
     "ipdata": {"name": "IPdata", "env": ["IPDATA_API_KEY"], "renew": "https://ipdata.co/sign-up.html"},
