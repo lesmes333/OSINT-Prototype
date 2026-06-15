@@ -619,6 +619,85 @@ class ReportGenerator:
                         md_content += f" · tags: {', '.join(str(t) for t in tags[:5])}"
                     md_content += f"\n\n> *Nota: {ransomware.get('nota','')}*\n\n"
 
+            # Capa 6: foros dark web + leak sites directos + infostealers
+            ds = dw.get('dark_sources', {})
+            if ds:
+                ds_nivel = ds.get('nivel_riesgo', 'LOW')
+                ds_icon  = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(ds_nivel, "⚪")
+                md_content += f"#### 🕵️ Capa 6 — Foros dark web / Leak sites directos / Infostealers — {ds_icon} {ds_nivel}\n\n"
+
+                # Hudson Rock (infostealer intel)
+                hr = ds.get('infostealer', {}) or {}
+                if hr.get('status') == 'success':
+                    emp = hr.get('employees', 0)
+                    usr = hr.get('users', 0)
+                    if emp > 0 or usr > 0:
+                        md_content += f"**⚠️ Hudson Rock (Infostealer Intelligence):**\n"
+                        md_content += f"- Empleados con credenciales comprometidas por infostealers: **{emp}**\n"
+                        md_content += f"- Usuarios del dominio comprometidos: **{usr}**\n"
+                        stealers = hr.get('stealers', [])
+                        if stealers:
+                            md_content += f"- Familias de malware: {', '.join(str(s) for s in stealers[:5])}\n"
+                        md_content += "\n"
+                    else:
+                        md_content += "✅ Hudson Rock: sin credenciales comprometidas por infostealers.\n\n"
+
+                # Leak sites directos (ransomware .onion)
+                ls_hits = ds.get('leaksites_hits', [])
+                scanned = ds.get('leaksites_scanned', 0)
+                if ls_hits:
+                    md_content += f"**⚠️ Encontrado en {len(ls_hits)} leak site(s) de ransomware (acceso directo via Tor):**\n\n"
+                    md_content += "| Grupo | Variante encontrada | Contexto |\n|-------|--------------------|---------|\n"
+                    for h in ls_hits[:10]:
+                        md_content += f"| {h.get('grupo','')} | `{h.get('variante','')}` | {h.get('contexto','')[:80]} |\n"
+                    md_content += "\n"
+                elif scanned:
+                    md_content += f"✅ {scanned} leak sites .onion escaneados — sin menciones del dominio.\n\n"
+
+                # RansomLook víctimas recientes
+                rl2_hits = ds.get('ransomlook_hits', [])
+                if rl2_hits:
+                    md_content += f"**⚠️ RansomLook — {len(rl2_hits)} víctima(s) relacionada(s):**\n\n"
+                    md_content += "| Grupo | Víctima | Fecha |\n|-------|---------|-------|\n"
+                    for h in rl2_hits[:5]:
+                        md_content += f"| {h.get('grupo','')} | {h.get('victima','')[:60]} | {h.get('fecha','')} |\n"
+                    md_content += "\n"
+
+                # Foros (BreachForums + clearnet)
+                fm_hits = ds.get('forum_hits', [])
+                if fm_hits:
+                    md_content += f"**⚠️ Menciones en foros de credenciales ({len(fm_hits)} resultados):**\n\n"
+                    md_content += "| Foro | Variante | Extracto |\n|------|---------|----------|\n"
+                    for h in fm_hits[:10]:
+                        md_content += f"| {h.get('fuente','')} | `{h.get('variante','')}` | {h.get('extracto','')[:80]} |\n"
+                    md_content += "\n"
+
+                # Motores de búsqueda Tor
+                ts_hits = ds.get('tor_search_hits', [])
+                if ts_hits:
+                    md_content += f"**⚠️ Resultados en motores .onion ({len(ts_hits)} encontrados):**\n\n"
+                    md_content += "| Motor | Variante | Enlace / Contexto |\n|-------|---------|-------------------|\n"
+                    for h in ts_hits[:8]:
+                        enlace = h.get('enlace', '')[:80]
+                        md_content += f"| {h.get('motor','')} | `{h.get('variante','')}` | `{enlace}` |\n"
+                    md_content += "\n"
+
+                # Telegram público
+                tg_hits = ds.get('telegram_hits', [])
+                if tg_hits:
+                    md_content += f"**⚠️ Menciones en canales Telegram públicos ({len(tg_hits)}):**\n\n"
+                    md_content += "| Canal | Variante | Extracto |\n|-------|---------|----------|\n"
+                    for h in tg_hits[:8]:
+                        md_content += f"| {h.get('fuente','')} | `{h.get('variante','')}` | {h.get('extracto','')[:80]} |\n"
+                    md_content += "\n"
+
+                # Pulsedive
+                pd = ds.get('pulsedive', {}) or {}
+                pd_risk = pd.get('risk', '')
+                if pd_risk and pd_risk not in ('none', 'unknown', 'error', ''):
+                    pd_feeds = ', '.join(pd.get('feeds', [])[:3]) or 'N/A'
+                    md_content += f"**Pulsedive (domain threat intel):** riesgo `{pd_risk}` · feeds: {pd_feeds}\n\n"
+
             # Capa 5: crawling .onion via Tor (si se ejecutó)
             raw_results = dw.get('raw_results', [])
             if raw_results:
@@ -840,19 +919,251 @@ class ReportGenerator:
             <p class="muted">Vulnerabilidades recientes de INCIBE-CERT que mencionan las tecnologías detectadas.</p>
             <table><thead><tr><th>CVE</th><th>Gravedad</th><th>CVSS</th><th>Fecha</th><th>Ficha</th></tr></thead><tbody>{ew_rows}</tbody></table></section>""" if ew_rows else ""
 
-        # ---- Dark web ----
+        # ---- Dark web / Exposición (todas las capas) ----
         dw_section = ""
-        if dw.get('status') == 'success':
-            rows = ""
-            for a in dw.get('analyzed_threats', []):
-                lvl = a.get('threat_level', 'LOW')
-                kind = {"HIGH": "crit", "MEDIUM": "high", "LOW": "low"}.get(lvl, "unk")
-                rows += (f"<tr><td class='muted'>{escape(a.get('url', '')[:60])}</td><td>{escape(a.get('title', '')[:50])}</td>"
-                         f"<td>{badge(lvl, kind)}</td><td class='muted'>{escape(', '.join(a.get('emails', [])[:2]))}</td></tr>")
-            body = f"<table><thead><tr><th>URL .onion</th><th>Título</th><th>Riesgo</th><th>Emails</th></tr></thead><tbody>{rows}</tbody></table>" if rows else ""
-            dw_section = f"<section><h2>🌑 Dark Web</h2><p class='muted'>{dw.get('total_links_found', 0)} enlaces .onion encontrados.</p>{body}</section>"
-        elif dw.get('status') == 'error':
-            dw_section = f"<section><h2>🌑 Dark Web</h2><p class='alert-inline'>⚠️ {escape(dw.get('message', ''))}</p></section>"
+        if dw.get('status') in ('success', 'error') or dw:
+            dw_summary  = dw.get('summary', {})
+            breaches_dw = dw.get('breaches', {})
+            ahmia_dw    = dw.get('ahmia', {})
+            pastes_dw   = dw.get('pastes', {})
+            rw_dw       = dw.get('ransomware', {})
+            ds_dw       = dw.get('dark_sources', {})
+
+            nivel_global = dw_summary.get('nivel_exposicion', 'LOW')
+            nivel_kind   = {"CRITICAL": "crit", "HIGH": "high", "MEDIUM": "med", "LOW": "low"}.get(nivel_global, "unk")
+            nivel_icon   = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(nivel_global, "⚪")
+
+            # ── Resumen de capas (tabla) ──────────────────────────────────────
+            def capa_badge(val, ok_zero=True):
+                """Verde si 0 (sin alertas), rojo si >0"""
+                if isinstance(val, int) and val > 0:
+                    return badge(val, "crit")
+                if isinstance(val, int):
+                    return badge(val, "low") if ok_zero else badge(val, "unk")
+                return escape(str(val))
+
+            c1_comp    = dw_summary.get('emails_comprometidos', 0)
+            c2_onion   = dw_summary.get('menciones_onion', 0)
+            c3_url     = dw_summary.get('urlscan_historico', 0)
+            c3_gh      = dw_summary.get('github_menciones', 0)
+            c4_rw      = dw_summary.get('ransomware_incidents', 0)
+            c4_nivel   = dw_summary.get('ransomware_nivel', 'LOW')
+            c6_ls      = dw_summary.get('leaksite_hits', 0)
+            c6_rl      = dw_summary.get('ransomlook_hits', 0)
+            c6_fm      = dw_summary.get('forum_hits', 0)
+            c6_ts      = dw_summary.get('tor_search_hits', 0)
+            c6_tg      = dw_summary.get('telegram_hits', 0)
+            c6_emp     = dw_summary.get('infostealer_empleados', 0)
+            c6_usr     = dw_summary.get('infostealer_usuarios', 0)
+            c6_nivel   = dw_summary.get('dark_sources_nivel', 'LOW')
+            c6_kind    = {"CRITICAL": "crit", "HIGH": "high", "MEDIUM": "med", "LOW": "low"}.get(c6_nivel, "unk")
+
+            summary_rows = (
+                f"<tr><td>1 · Brechas de datos</td><td>{capa_badge(c1_comp)} email(s) comprometidos</td></tr>"
+                f"<tr><td>2 · Índice dark web</td><td>{capa_badge(c2_onion)} mención(es) .onion</td></tr>"
+                f"<tr><td>3 · Leaks fuentes abiertas</td><td>URLScan: {escape(str(c3_url))} · GitHub: {escape(str(c3_gh))}</td></tr>"
+                f"<tr><td>4 · Ransomware &amp; ciberataques</td><td>{capa_badge(c4_rw)} incidente(s) · nivel {escape(c4_nivel)}</td></tr>"
+                f"<tr><td>6 · Leak sites / Foros / Infostealers</td>"
+                f"<td>{badge(c6_nivel, c6_kind)} leaksites:{escape(str(c6_ls))} rl:{escape(str(c6_rl))} "
+                f"foros:{escape(str(c6_fm))} tor-search:{escape(str(c6_ts))} "
+                f"telegram:{escape(str(c6_tg))} · infostealers: {capa_badge(c6_emp)} emp / {escape(str(c6_usr))} usr</td></tr>"
+            )
+            overview = (
+                f"<p>{nivel_icon} <b>Nivel de exposición: {badge(nivel_global, nivel_kind)}</b></p>"
+                f"<table><thead><tr><th>Capa</th><th>Resultado</th></tr></thead><tbody>{summary_rows}</tbody></table>"
+            )
+
+            # ── Capa 1: brechas de emails ─────────────────────────────────────
+            c1_section = ""
+            comp_emails = breaches_dw.get('compromised', [])
+            if comp_emails:
+                erows = "".join(
+                    f"<tr><td><code>{escape(e.get('email',''))}</code></td>"
+                    f"<td class='muted'>{escape(', '.join(e.get('breaches', [])[:3]))}</td></tr>"
+                    for e in comp_emails[:10]
+                )
+                c1_section = (
+                    f"<h3>📧 Capa 1 — Brechas de datos</h3>"
+                    f"<table><thead><tr><th>Email</th><th>Brechas</th></tr></thead><tbody>{erows}</tbody></table>"
+                )
+            xon_domain = breaches_dw.get('xon_domain_breaches', {})
+            if xon_domain and xon_domain.get('ExposedBreaches'):
+                c1_section += (
+                    f"<p class='muted'>XposedOrNot dominio: "
+                    f"{escape(str(xon_domain.get('BreachesSummary', {}).get('site', 0)))} brecha(s) asociadas al dominio.</p>"
+                )
+
+            # ── Capa 2: .onion links ──────────────────────────────────────────
+            c2_section = ""
+            onion_links = dw.get('raw_results', [])
+            if onion_links:
+                lrows = "".join(
+                    f"<tr><td class='muted'><code>{escape(lk.get('link','')[:80])}</code></td>"
+                    f"<td>{escape(lk.get('title','')[:60])}</td>"
+                    f"<td class='muted'>{escape(lk.get('source',''))}</td></tr>"
+                    for lk in onion_links[:15]
+                )
+                c2_section = (
+                    f"<h3>🌑 Capa 2 — Índice dark web ({len(onion_links)} enlace(s) .onion)</h3>"
+                    f"<table><thead><tr><th>URL .onion</th><th>Título</th><th>Fuente</th></tr></thead>"
+                    f"<tbody>{lrows}</tbody></table>"
+                )
+
+            # ── Capa 3: paste / GitHub highlights ────────────────────────────
+            c3_section = ""
+            gh_repos = pastes_dw.get('github_repos', [])
+            if gh_repos:
+                grepos = "".join(
+                    f"<tr><td><code>{escape(r.get('repo','')[:60])}</code></td>"
+                    f"<td class='muted'>{escape(r.get('file','')[:60])}</td></tr>"
+                    for r in gh_repos[:8]
+                )
+                c3_section = (
+                    f"<h3>📋 Capa 3 — Repos públicos con menciones ({c3_gh})</h3>"
+                    f"<table><thead><tr><th>Repositorio</th><th>Archivo</th></tr></thead>"
+                    f"<tbody>{grepos}</tbody></table>"
+                )
+
+            # ── Capa 4: ransomware ────────────────────────────────────────────
+            c4_section = ""
+            rw_victims  = rw_dw.get('victims', [])
+            rw_attacks  = rw_dw.get('cyberattacks', [])
+            rl_victims  = rw_dw.get('ransomlook', [])
+            if rw_victims or rw_attacks or rl_victims:
+                vrows = "".join(
+                    f"<tr><td class='muted'>{escape(v.get('grupo',''))}</td>"
+                    f"<td>{escape(v.get('victima','')[:60])}</td>"
+                    f"<td class='muted'>{escape(v.get('fecha',''))}</td></tr>"
+                    for v in (rw_victims + rl_victims)[:10]
+                )
+                c4_section = (
+                    f"<h3>🦠 Capa 4 — Ransomware &amp; ciberataques {badge(c4_nivel, {'CRITICAL':'crit','HIGH':'high','MEDIUM':'med','LOW':'low'}.get(c4_nivel,'unk'))}</h3>"
+                    f"<table><thead><tr><th>Grupo</th><th>Víctima</th><th>Fecha</th></tr></thead>"
+                    f"<tbody>{vrows}</tbody></table>"
+                )
+
+            # ── Capa 6: foros / leak sites / infostealers ─────────────────────
+            c6_section = f"<h3>🕵️ Capa 6 — Foros / Leak sites directos / Infostealers {badge(c6_nivel, c6_kind)}</h3>"
+
+            # Hudson Rock
+            hr = ds_dw.get('infostealer', {}) or {}
+            if hr.get('status') == 'success':
+                if c6_emp > 0 or c6_usr > 0:
+                    stealers = ', '.join(str(s) for s in hr.get('stealers', [])[:5]) or 'N/D'
+                    c6_section += (
+                        f"<p><b>⚠️ Hudson Rock (infostealers):</b> "
+                        f"{badge(c6_emp, 'crit')} empleados · {escape(str(c6_usr))} usuarios comprometidos"
+                        f" · malware: {escape(stealers)}</p>"
+                    )
+                else:
+                    c6_section += "<p>✅ Hudson Rock: sin credenciales comprometidas por infostealers.</p>"
+
+            # Leak sites escaneados
+            ls_scanned = ds_dw.get('leaksites_scanned', 0)
+            ls_hits_list = ds_dw.get('leaksites_hits', [])
+            if ls_hits_list:
+                lhrows = "".join(
+                    f"<tr><td>{escape(h.get('grupo',''))}</td>"
+                    f"<td><code>{escape(h.get('variante',''))}</code></td>"
+                    f"<td class='muted'>{escape(h.get('contexto','')[:80])}</td></tr>"
+                    for h in ls_hits_list[:10]
+                )
+                c6_section += (
+                    f"<p><b>⚠️ {len(ls_hits_list)} leak site(s) de ransomware mencionan el dominio:</b></p>"
+                    f"<table><thead><tr><th>Grupo</th><th>Variante</th><th>Contexto</th></tr></thead>"
+                    f"<tbody>{lhrows}</tbody></table>"
+                )
+            elif ls_scanned:
+                c6_section += f"<p class='muted'>✅ {ls_scanned} leak sites .onion escaneados — sin menciones.</p>"
+
+            # Foros
+            fm_hits_list = ds_dw.get('forum_hits', [])
+            if fm_hits_list:
+                fhrows = "".join(
+                    f"<tr><td>{escape(h.get('fuente',''))}</td>"
+                    f"<td><code>{escape(h.get('variante',''))}</code></td>"
+                    f"<td class='muted'>{escape(h.get('extracto','')[:80])}</td></tr>"
+                    for h in fm_hits_list[:10]
+                )
+                c6_section += (
+                    f"<p><b>⚠️ {len(fm_hits_list)} menciones en foros de credenciales:</b></p>"
+                    f"<table><thead><tr><th>Foro</th><th>Variante</th><th>Extracto</th></tr></thead>"
+                    f"<tbody>{fhrows}</tbody></table>"
+                )
+
+            # Motores Tor
+            ts_hits_list = ds_dw.get('tor_search_hits', [])
+            if ts_hits_list:
+                throws = "".join(
+                    f"<tr><td>{escape(h.get('motor',''))}</td>"
+                    f"<td><code>{escape(h.get('variante',''))}</code></td>"
+                    f"<td class='muted'><code>{escape(h.get('enlace','')[:80])}</code></td></tr>"
+                    for h in ts_hits_list[:8]
+                )
+                c6_section += (
+                    f"<p><b>⚠️ {len(ts_hits_list)} resultado(s) en motores .onion:</b></p>"
+                    f"<table><thead><tr><th>Motor</th><th>Variante</th><th>Enlace</th></tr></thead>"
+                    f"<tbody>{throws}</tbody></table>"
+                )
+
+            # Telegram
+            tg_hits_list = ds_dw.get('telegram_hits', [])
+            if tg_hits_list:
+                tgrows = "".join(
+                    f"<tr><td>{escape(h.get('fuente',''))}</td>"
+                    f"<td><code>{escape(h.get('variante',''))}</code></td>"
+                    f"<td class='muted'>{escape(h.get('extracto','')[:80])}</td></tr>"
+                    for h in tg_hits_list[:8]
+                )
+                c6_section += (
+                    f"<p><b>⚠️ {len(tg_hits_list)} menciones en canales Telegram públicos:</b></p>"
+                    f"<table><thead><tr><th>Canal</th><th>Variante</th><th>Extracto</th></tr></thead>"
+                    f"<tbody>{tgrows}</tbody></table>"
+                )
+
+            # RansomLook
+            rl2_hits = ds_dw.get('ransomlook_hits', [])
+            if rl2_hits:
+                rl2rows = "".join(
+                    f"<tr><td>{escape(h.get('grupo',''))}</td>"
+                    f"<td>{escape(h.get('victima','')[:60])}</td>"
+                    f"<td class='muted'>{escape(h.get('fecha',''))}</td></tr>"
+                    for h in rl2_hits[:5]
+                )
+                c6_section += (
+                    f"<p><b>⚠️ RansomLook: {len(rl2_hits)} víctima(s) encontrada(s):</b></p>"
+                    f"<table><thead><tr><th>Grupo</th><th>Víctima</th><th>Fecha</th></tr></thead>"
+                    f"<tbody>{rl2rows}</tbody></table>"
+                )
+
+            # Pulsedive
+            pd_r = (ds_dw.get('pulsedive') or {}).get('risk', '')
+            if pd_r and pd_r not in ('none', 'unknown', 'error', ''):
+                c6_section += f"<p><b>Pulsedive:</b> riesgo {badge(pd_r, sev_kind(pd_r))}</p>"
+
+            # ── Capa 5: crawling Tor ──────────────────────────────────────────
+            c5_section = ""
+            analyzed = dw.get('analyzed_threats', [])
+            if analyzed:
+                arows = "".join(
+                    f"<tr><td class='muted'>{escape(a.get('url','')[:60])}</td>"
+                    f"<td>{escape(a.get('title','')[:50])}</td>"
+                    f"<td>{badge(a.get('threat_level','LOW'), {'HIGH':'crit','MEDIUM':'high','LOW':'low'}.get(a.get('threat_level','LOW'),'unk'))}</td>"
+                    f"<td class='muted'>{escape(', '.join(a.get('emails',[])[:2]))}</td></tr>"
+                    for a in analyzed[:15]
+                )
+                c5_section = (
+                    f"<h3>🔎 Capa 5 — Crawling .onion profundo</h3>"
+                    f"<table><thead><tr><th>URL</th><th>Título</th><th>Riesgo</th><th>Emails</th></tr></thead>"
+                    f"<tbody>{arows}</tbody></table>"
+                )
+
+            dw_section = (
+                f"<section><h2>🛡️ Exposición &amp; Dark Web</h2>"
+                f"{overview}"
+                f"{c1_section}{c2_section}{c3_section}{c4_section}{c6_section}{c5_section}"
+                f"</section>"
+            )
 
         whois = discovery_data.get('whois', {})
         whois_html = "".join(

@@ -392,6 +392,46 @@ def table_exposure(dw: Dict):
 
         if dw.get("tor", {}).get("status") == "success":
             t.add_row("5 · Tor (.onion crawl)", f"{len(dw.get('analyzed_threats', []))} analizado(s)")
+
+        # Capa 6: foros dark web + leak sites directos + infostealers
+        ds = dw.get("dark_sources", {})
+        ds_nivel  = ds.get("nivel_riesgo", "LOW")
+        ls_hits   = len(ds.get("leaksites_hits", []))
+        rl2_hits  = len(ds.get("ransomlook_hits", []))
+        fm_hits   = len(ds.get("forum_hits", []))
+        ts_hits   = len(ds.get("tor_search_hits", []))
+        tg_hits   = len(ds.get("telegram_hits", []))
+        ps_hits   = len(ds.get("paste_hits", []))
+        hr_emp    = ds.get("infostealer", {}).get("employees", 0) if isinstance(ds.get("infostealer"), dict) else 0
+        hr_usr    = ds.get("infostealer", {}).get("users", 0) if isinstance(ds.get("infostealer"), dict) else 0
+        scanned   = ds.get("leaksites_scanned", 0)
+        pd_risk   = ds.get("pulsedive", {}).get("risk", "") if isinstance(ds.get("pulsedive"), dict) else ""
+        ds_style  = {"CRITICAL": "bold red", "HIGH": "bold red",
+                     "MEDIUM": "yellow", "LOW": "green"}.get(ds_nivel, "dim")
+        any_hit   = ls_hits or rl2_hits or fm_hits or ts_hits or tg_hits or hr_emp
+        if any_hit:
+            parts = []
+            if ls_hits:   parts.append(f"leaksites:{ls_hits}")
+            if rl2_hits:  parts.append(f"ransomlook:{rl2_hits}")
+            if fm_hits:   parts.append(f"foros:{fm_hits}")
+            if ts_hits:   parts.append(f"tor-search:{ts_hits}")
+            if tg_hits:   parts.append(f"telegram:{tg_hits}")
+            if hr_emp:    parts.append(f"infostealers:{hr_emp}emp/{hr_usr}usr")
+            ds_txt = Text(
+                f"⚠️ {' | '.join(parts)} — {ds_nivel}",
+                style=ds_style,
+            )
+        else:
+            extras = []
+            if scanned:  extras.append(f"{scanned} leaksites escaneados")
+            if pd_risk and pd_risk not in ("none", "unknown"):
+                extras.append(f"Pulsedive:{pd_risk}")
+            extras.append(f"Hudson Rock:{hr_emp} emp comprometidos")
+            ds_txt = Text(
+                "Sin hits · " + " · ".join(extras),
+                style="green" if hr_emp == 0 else "yellow",
+            )
+        t.add_row("6 · Leak sites / Foros / Infostealers", ds_txt)
         console.print(t)
 
         # Aviso de dark web si requiere configuración adicional

@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 
-from .utils import get_logger, make_session, run_parallel
+from .utils import get_logger, make_session, run_parallel, run_named_parallel
 
 log = get_logger()
 
@@ -797,14 +797,49 @@ class ExposureMonitor:
             return {"status": "error", "message": str(e)}
 
     # ============================================================
+    # CAPA 6 — Foros dark web + leak sites directos + infostealers
+    # ============================================================
+    def layer_darkweb_sources(self) -> Dict:
+        """
+        Capa 6: búsqueda activa en fuentes dark web conocidas.
+
+        Cubre cuatro vectores:
+          A) Leak sites .onion de 60+ grupos de ransomware activos (via Tor directo)
+          B) BreachForums .onion + clearnet (foro principal de credenciales)
+          C) Hudson Rock infostealer intelligence (gratis, sin clave)
+          D) Paste sites especializados en leaks
+        """
+        log.info("   [*] Capa 6: foros dark web + leak sites directos + infostealers...")
+        from .darkweb_sources import run_full_darkweb_scan
+        result = run_full_darkweb_scan(
+            domain        = self.domain,
+            intelx_key    = self.intelx_key,
+            use_tor       = self._tor_up,
+            scan_leaksites= self._tor_up,  # solo si Tor activo
+        )
+        return result
+
+    # ============================================================
     # Orquestación
     # ============================================================
     def run_all(self) -> Dict:
-        breaches   = self.layer_breaches()
-        ahmia      = self.layer_ahmia()        # Capa 2: dark web index
-        pastes     = self.layer_pastes()        # Capa 3: leaks fuentes abiertas
-        ransomware = self.layer_ransomware()    # Capa 4: ransomware/ciberataques (NUEVO)
-        tor        = self.layer_tor() if self.run_tor else {"status": "skipped"}
+        # Todas las capas son independientes — se lanzan en paralelo
+        layer_results = run_named_parallel({
+            "breaches":     self.layer_breaches,
+            "ahmia":        self.layer_ahmia,
+            "pastes":       self.layer_pastes,
+            "ransomware":   self.layer_ransomware,
+            "tor":          (self.layer_tor if self.run_tor
+                             else lambda: {"status": "skipped"}),
+            "dark_sources": self.layer_darkweb_sources,
+        }, max_workers=6)
+
+        breaches     = layer_results.get("breaches",     {})
+        ahmia        = layer_results.get("ahmia",        {})
+        pastes       = layer_results.get("pastes",       {})
+        ransomware   = layer_results.get("ransomware",   {})
+        tor          = layer_results.get("tor",          {"status": "skipped"})
+        dark_sources = layer_results.get("dark_sources", {})
 
         onion_links = [{"title": x["title"],
                         "link": f"http://{x['onion']}" if x.get("onion") else x.get("description", ""),
@@ -819,18 +854,34 @@ class ExposureMonitor:
                     onion_links.append(tr)
 
         # Nivel de exposición global (toma el peor nivel de todas las capas)
-        rw_nivel = ransomware.get("nivel_riesgo", "LOW")
+        rw_nivel  = ransomware.get("nivel_riesgo", "LOW")
+        ds_nivel  = dark_sources.get("nivel_riesgo", "LOW")
+        hr_empleados = dark_sources.get("infostealer", {}).get("employees", 0)
+        hr_usuarios  = dark_sources.get("infostealer", {}).get("users", 0)
+
         summary = {
-            "emails_comprometidos":   breaches.get("compromised_emails", 0),
-            "menciones_onion":        ahmia.get("total", 0),
-            "urlscan_historico":      pastes.get("urlscan_count", 0),
-            "github_menciones":       pastes.get("github_total", 0),
-            "pastebin_hits":          pastes.get("pastebin_count", 0),
-            "intelx_pastes":          pastes.get("intelx_count", 0),
-            "ransomware_incidents":   ransomware.get("total_incidents", 0),
-            "ransomware_nivel":       rw_nivel,
+            "emails_comprometidos":    breaches.get("compromised_emails", 0),
+            "menciones_onion":         ahmia.get("total", 0),
+            "urlscan_historico":       pastes.get("urlscan_count", 0),
+            "github_menciones":        pastes.get("github_total", 0),
+            "pastebin_hits":           pastes.get("pastebin_count", 0),
+            "intelx_pastes":           pastes.get("intelx_count", 0),
+            "ransomware_incidents":    ransomware.get("total_incidents", 0),
+            "ransomware_nivel":        rw_nivel,
             "maltiverse_clasificacion": ransomware.get("maltiverse", {}).get("clasificacion", ""),
+            # Capa 6 — fuentes dark web
+            "leaksite_hits":           len(dark_sources.get("leaksites_hits", [])),
+            "ransomlook_hits":         len(dark_sources.get("ransomlook_hits", [])),
+            "forum_hits":              len(dark_sources.get("forum_hits", [])),
+            "tor_search_hits":         len(dark_sources.get("tor_search_hits", [])),
+            "paste_hits":              len(dark_sources.get("paste_hits", [])),
+            "telegram_hits":           len(dark_sources.get("telegram_hits", [])),
+            "infostealer_empleados":   hr_empleados,
+            "infostealer_usuarios":    hr_usuarios,
+            "pulsedive_riesgo":        dark_sources.get("pulsedive", {}).get("risk", ""),
+            "dark_sources_nivel":      ds_nivel,
         }
+
         # El nivel final es el más grave de todas las capas
         niveles_orden = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
         nivel = "LOW"
@@ -838,19 +889,21 @@ class ExposureMonitor:
             nivel = "HIGH"
         if summary["menciones_onion"] > 0 or summary["github_menciones"] > 5:
             nivel = max(nivel, "MEDIUM", key=niveles_orden.index)
-        nivel = max(nivel, rw_nivel, key=niveles_orden.index)
+        nivel = max(nivel, rw_nivel,  key=niveles_orden.index)
+        nivel = max(nivel, ds_nivel,  key=niveles_orden.index)
         summary["nivel_exposicion"] = nivel
 
         return {
-            "status":   "success",
-            "keyword":  self.domain,
-            "breaches": breaches,
-            "ahmia":    ahmia,
-            "pastes":   pastes,
-            "ransomware": ransomware,     # Capa 4 nueva
-            "tor":      tor,
-            "summary":  summary,
-            # compatibilidad con contrato 'darkweb' anterior
+            "status":       "success",
+            "keyword":      self.domain,
+            "breaches":     breaches,
+            "ahmia":        ahmia,
+            "pastes":       pastes,
+            "ransomware":   ransomware,
+            "dark_sources": dark_sources,   # Capa 6
+            "tor":          tor,
+            "summary":      summary,
+            # compatibilidad con contrato anterior
             "total_links_found": len(onion_links),
             "raw_results":       onion_links,
             "analyzed_threats":  analyzed_threats,

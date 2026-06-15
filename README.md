@@ -47,16 +47,17 @@ Detecta exposición del dominio en fuentes públicas, deep web y dark web **lega
 | **3. Leaks en fuentes abiertas** | Historial público + repos + Pastebin | URLScan · GitHub · **Pastebin/archive vía Tor** (gratis) · Pastebin Pro · IntelX | `URLSCAN_API_KEY`, `GITHUB_TOKEN`, `PASTEBIN_API_KEY`* |
 | **4. Ransomware & Ciberataques** | Si el dominio aparece en leak sites de grupos de ransomware activos + reputación de dominio | **ransomware.live · RansomLook · Maltiverse** (todos gratis, sin clave) | — |
 | **5. Crawling .onion** | Análisis profundo de páginas `.onion` con contenido amenazante | Tor + Ahmia .onion + Haystak + Torch + 15 motores adicionales | `--tor` + Tor en `:9050` |
+| **6. Foros / Leak sites / Infostealers** | Búsqueda activa en fuentes dark web conocidas: foros de credenciales, acceso directo a 80+ leak sites de ransomware, inteligencia de infostealers, Telegram público | **80+ leak sites .onion** directos · **BreachForums** (.onion+clearnet) · **XSS.is, Nulled.to, Cracked.io, exploit.in** · **Ahmia+OnionLand+Haystak+Torch+DarkSearch** (motores .onion) · **Hudson Rock** (infostealers gratis) · **Pulsedive** (domain intel) · **7 canales Telegram** públicos · DeepPaste + Ghostbin + paste.ee + Justpaste.it | `--tor` (recomendado para máxima cobertura) |
 
 > \* **Pastebin Pro** (`PASTEBIN_API_KEY`): el CISO considera Pastebin una fuente clave. Requiere cuenta Pro en [pastebin.com/pro](https://pastebin.com/pro) ($8.95/mes). Sin ella, la Capa 3 usa el **archivo público de Pastebin vía Tor** como alternativa gratuita.
 
-> 💡 **Capa 4 (Ransomware) sin coste:** las fuentes `ransomware.live`, `RansomLook` y `Maltiverse` son APIs públicas gratuitas y sin clave que cubren el mismo contenido que ofrecen herramientas comerciales de "dark web monitoring" a precios de $500–$5.000/mes.
+> 💡 **Capa 6 (Dark web real) sin coste:** la herramienta accede directamente a **80+ leak sites `.onion`** de grupos de ransomware activos, busca en BreachForums, XSS.is, foros rusos de credenciales, consulta **Hudson Rock** (infostealer intelligence) y busca en **7 canales Telegram públicos** de filtraciones — todo gratis, sin claves de pago. Esto cubre lo que herramientas comerciales de *dark web monitoring* (DarkOwl, Flare.io, Recorded Future) cobran a $500–$5.000/mes.
 
 > ⚠️ **Sobre Ahmia en clearnet:** Ahmia.fi clearnet redirige a su homepage sin devolver resultados (requiere Tor Browser). La herramienta accede directamente al `.onion` de Ahmia vía Tor, evitando el problema. Usa `--tor` para activar las búsquedas en motores .onion.
 
 **Correos:** se descubren **automáticamente** desde Hunter.io durante el escaneo. No es necesario configurar `MONITOR_EMAILS`.
 
-**Sin ninguna clave de pago**, la Fase 4 funciona con: XposedOrNot + XposedOrNot domain-level + URLScan + GitHub + Pastebin/Tor + **todos los motores .onion** (con Tor) + ransomware.live + RansomLook + Maltiverse.
+**Sin ninguna clave de pago**, la Fase 4 funciona con: XposedOrNot + XposedOrNot domain-level + URLScan + GitHub + Pastebin/Tor + **todos los motores .onion** (con Tor) + ransomware.live + RansomLook + Maltiverse + **Capa 6 completa** (80 leak sites + foros + infostealers + Telegram).
 
 > ✅ Solo se consultan índices y APIs públicas. No se accede a sistemas ajenos ni se descarga contenido ilegal. Acorde con un marco defensivo y autorizado.
 
