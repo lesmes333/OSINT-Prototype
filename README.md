@@ -91,6 +91,8 @@ bash install.sh
 ```
 El script crea el entorno virtual, instala las dependencias y prepara el `.env`.
 
+> ⚠️ **Importante:** `install.sh` instala todo dentro del entorno virtual (`venv/`), pero **NO deja el venv activado en tu terminal**. Antes de ejecutar la herramienta tienes que activarlo tú (ver el paso siguiente). Si lanzas `python3 main.py` sin activar el venv, usará el Python del sistema y verás errores como `ModuleNotFoundError: No module named 'dotenv'`.
+
 #### Opción B — Manual (macOS / Linux / Windows)
 ```bash
 # 1) Clonar el repositorio
@@ -113,10 +115,26 @@ nano .env                         # añade tus claves: Shodan, VirusTotal, Hunte
 
 > ✅ La herramienta **funciona sin API keys**: el descubrimiento de subdominios usa 9 fuentes públicas gratuitas. Las claves solo **amplían** la información de Threat Intel (ver [tabla de claves](#-configurar-api-keys-env)).
 
-**Comprobar que el núcleo funciona:**
+#### ▶️ Activar el venv y comprobar que funciona
+
+**Cada vez** que abras una terminal nueva para usar la herramienta, primero activa el entorno virtual:
+
 ```bash
+cd OSINT-Prototype
+source venv/bin/activate          # Windows (PowerShell): venv\Scripts\Activate.ps1
+```
+Verás que el prompt cambia a `(venv)`. A partir de ahí ya puedes usar `python` (sin el `3`). Para salir del venv: `deactivate`.
+
+```bash
+# Con el venv activado:
 python main.py -d ejemplo.com -y --no-darkweb --no-fingerprint
 ```
+
+> 💡 **¿`python: command not found`?** En Ubuntu/Debian el binario del sistema es `python3` (no `python`). Tienes dos soluciones:
+> - **Recomendado:** activa el venv (`source venv/bin/activate`) — dentro del venv sí existe `python`.
+> - **Sin activar:** llama directamente al Python del venv: `venv/bin/python main.py -d ejemplo.com -y`
+>
+> Usar el `python3` del sistema (sin venv) **no** funcionará porque las dependencias están instaladas dentro del venv.
 
 ---
 
