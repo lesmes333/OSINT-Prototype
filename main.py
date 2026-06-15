@@ -53,6 +53,7 @@ def parse_args(argv=None):
         help="Activar/desactivar monitorización en dark web (requiere Tor).",
     )
     p.add_argument("--no-active", action="store_true", help="Omitir verificación ICMP/TCP de hosts.")
+    p.add_argument("--no-diff", action="store_true", help="No comparar con el escaneo anterior (modo monitorización).")
     p.add_argument("--all", action="store_true", help="Ejecutar todas las fases (fingerprint + darkweb).")
     p.add_argument(
         "-y", "--yes", action="store_true",
@@ -215,6 +216,20 @@ def analyze_domain(domain, args, do_fp, do_dw):
     threat_results["diagnostics"] = diag
     ui.diagnostics(diag)
 
+    # --- MONITORIZACIÓN: comparar con el escaneo anterior (antes de escribir el nuevo) ---
+    changes = {"status": "desactivado"}
+    if not args.no_diff:
+        from scripts.modules import diffing
+
+        slug = domain.replace(".", "_")
+        current_snapshot = {
+            "dominio_analizado": domain,
+            "discovery": discovery_results,
+            "threat_intel": threat_results,
+        }
+        changes = diffing.compute(current_snapshot, args.output_dir, slug)
+        ui.table_changes(changes)
+
     # --- FASE 3: informes ---
     ui.phase("FASE 3", "GENERACIÓN DE INFORMES", f"Formatos: {args.formats} → {args.output_dir}/")
     formats = {f.strip() for f in args.formats.split(",") if f.strip()}
@@ -226,6 +241,7 @@ def analyze_domain(domain, args, do_fp, do_dw):
                 "discovery": discovery_results,
                 "threat_intel": threat_results,
                 "diagnostics": diag,
+                "changes_since_last_scan": changes,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         )

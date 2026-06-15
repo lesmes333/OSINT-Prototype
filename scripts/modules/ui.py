@@ -205,6 +205,37 @@ def table_dns(dns_records: Dict):
             _plain(f"  {k}: {', '.join(str(x) for x in v[:5])}")
 
 
+def table_changes(diff: Dict):
+    """Muestra los cambios respecto al escaneo anterior (modo monitorización)."""
+    if not isinstance(diff, dict) or diff.get("status") != "ok":
+        return
+    if not diff.get("hay_cambios"):
+        _plain("📋 Sin cambios respecto al escaneo anterior.") if not _RICH else \
+            console.print("[dim]📋 Sin cambios respecto al escaneo anterior.[/]")
+        return
+
+    secciones = [
+        ("🆕 Subdominios nuevos", diff.get("subdominios_nuevos", []), "bold green"),
+        ("➖ Subdominios desaparecidos", diff.get("subdominios_eliminados", []), "yellow"),
+        ("🔴 CVEs nuevos", diff.get("cves_nuevos", []), "bold red"),
+        ("🔌 Puertos nuevos", diff.get("puertos_nuevos", []), "bold magenta"),
+    ]
+    ref = diff.get("previo_timestamp", "")
+    if _RICH:
+        t = Table(title=f"🔁 Cambios desde el último escaneo ({ref})", box=box.SIMPLE_HEAVY, header_style="bold cyan")
+        t.add_column("Cambio", style="white")
+        t.add_column("Elementos", style="white")
+        for titulo, items, estilo in secciones:
+            if items:
+                t.add_row(Text(titulo, style=estilo), ", ".join(items[:30]))
+        console.print(t)
+    else:
+        _plain(f"\nCambios desde el último escaneo ({ref}):")
+        for titulo, items, _ in secciones:
+            if items:
+                _plain(f"  {titulo}: {', '.join(items[:30])}")
+
+
 def table_technologies(fp: Dict):
     results = fp.get("results", []) if isinstance(fp, dict) else []
     if not results:

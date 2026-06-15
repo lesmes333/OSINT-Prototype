@@ -238,11 +238,28 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 | `--fingerprint / --no-fingerprint` | Activa/desactiva fingerprinting + CVEs + INCIBE. |
 | `--darkweb / --no-darkweb` | Activa/desactiva la dark web. |
 | `--no-active` | Omite la verificación ICMP/TCP. |
+| `--no-diff` | No compara con el escaneo anterior (desactiva la monitorización). |
 | `-t, --threads` | Hilos concurrentes (def: 30). |
 | `--formats` | `json,csv,md,html` (def: todos). |
 | `-o, --output-dir` | Carpeta de salida (def: `outputs`). |
 | `--max-fp-urls` | Máx. URLs para fingerprinting (def: 25). |
 | `-q / -v` | Salida mínima / detallada. |
+
+### 🔁 Modo monitorización (diff entre escaneos)
+
+Cada vez que analizas un dominio, la herramienta **compara automáticamente** con el escaneo anterior del mismo dominio (busca el `activos_<dominio>_*.json` previo en la carpeta de salida) y resalta:
+
+- 🆕 **Subdominios nuevos** y ➖ **desaparecidos**
+- 🔴 **CVEs nuevos**
+- 🔌 **Puertos abiertos nuevos**
+
+El resumen sale en pantalla y se guarda dentro del JSON (`changes_since_last_scan`). Desactívalo con `--no-diff`.
+
+Ideal para vigilancia periódica con **cron**. Ejemplo: escaneo diario a las 8:00 guardando histórico en `outputs/`:
+```bash
+0 8 * * *  cd /ruta/OSINT-Prototype && venv/bin/python main.py -d ejemplo.com -y --all >> outputs/cron.log 2>&1
+```
+Como conserva todos los JSON con fecha, cada ejecución se compara con la anterior y verás aparecer lo nuevo.
 
 ---
 
@@ -315,8 +332,8 @@ OSINT-Prototype/
     ├── threat_intel.py          # 13 APIs de threat intelligence en paralelo
     ├── fingerprint.py           # Wappalyzer (Docker) en paralelo
     ├── cve_exploit.py           # CVEs (NVD) + exploits (Exploit-DB) + INCIBE
-    ├── exploit_db.py            # Integración opcional con la API local de Exploit-DB
     ├── incibe.py                # Integración con INCIBE-CERT (alerta temprana)
+    ├── diffing.py               # Modo monitorización: compara con el escaneo anterior
     ├── diagnostics.py           # Estado de API keys y herramientas
     ├── darkweb_monitor.py       # Dark web (Tor) + crawling
     └── report.py                # Informes JSON / CSV / Markdown / HTML
