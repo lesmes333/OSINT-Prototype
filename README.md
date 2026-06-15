@@ -30,11 +30,26 @@ Herramienta OSINT (Open Source Intelligence) para **descubrir los activos expues
 | **1. Descubrimiento** | Subdominios + DNS + WHOIS + actividad de hosts | crt.sh, certspotter, HackerTarget, RapidDNS, Anubis, OTX, Wayback, DNSdumpster, Subfinder |
 | **2. Threat Intel** | Reputación, puertos, geolocalización, emails, menciones | 13 APIs (Shodan, VirusTotal, Censys, AbuseIPDB, Hunter…) |
 | **2.5. Tecnologías + CVEs** | Fingerprinting → CVEs → exploits → **INCIBE-CERT** | Wappalyzer, NVD, Exploit-DB, **INCIBE-CERT** |
-| **4. Dark Web** | Búsqueda multi-motor + crawling de `.onion` | Ahmia + Tor |
+| **4. Exposición y filtraciones** | Brechas de datos + índice dark web + paste sites (+ Tor opcional) | XposedOrNot, HIBP, Ahmia, PSBDMP, Tor |
 | **3. Informes** | JSON · CSV · Markdown · **HTML visual** | — |
 
 ### ⚡ Rápido por diseño
 Todas las fases con llamadas independientes se ejecutan **en paralelo** (subdominios, las 13 APIs, verificación de hosts, fingerprinting, exploits). Las peticiones HTTP llevan **reintentos automáticos** ante errores transitorios (429/5xx).
+
+### 🛡️ Monitorización de exposición y filtraciones (Fase 4)
+
+Detecta exposición del dominio en fuentes públicas, deep web y dark web **legalmente accesibles**, por capas (todo defensivo y no intrusivo):
+
+| Capa | Qué busca | Fuente | Requiere |
+|------|-----------|--------|----------|
+| **1. Brechas de datos** | Correos del dominio en filtraciones conocidas | XposedOrNot (gratis) + HIBP (`HIBP_API_KEY`, opcional) | — |
+| **2. Índice dark web** | Menciones del dominio en `.onion` indexados | Ahmia (por clearnet, **sin Tor**) | — |
+| **3. Paste sites** | Menciones en volcados de Pastebin | PSBDMP (gratis) | — |
+| **4. Crawling .onion** | Análisis de enlaces `.onion` (avanzado, opcional) | Tor | `--tor` + Tor en `:9050` |
+
+Los correos a vigilar salen de **Hunter.io** (descubiertos automáticamente) y de la variable opcional **`MONITOR_EMAILS`** del `.env` (ej. `MONITOR_EMAILS="rrhh@zunder.com,soporte@zunder.com"`). Las capas 1-3 funcionan **sin Tor**; la capa 4 solo se ejecuta con `--tor`.
+
+> ✅ Solo se consultan índices y APIs públicas. No se accede a sistemas ajenos ni se descarga contenido ilegal. Acorde con un marco defensivo y autorizado.
 
 ### 🇪🇸 Integración con INCIBE-CERT
 Cada CVE detectado se **enlaza con su ficha en español** de la *Alerta Temprana* de INCIBE-CERT (verificando que existe). Las que están en alerta temprana reciente se marcan con ⚠️, y además se cruzan las tecnologías detectadas con el feed reciente.
@@ -236,7 +251,8 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 | `-y, --yes` | No interactivo: no pregunta nada. |
 | `--all` | Ejecuta todas las fases. |
 | `--fingerprint / --no-fingerprint` | Activa/desactiva fingerprinting + CVEs + INCIBE. |
-| `--darkweb / --no-darkweb` | Activa/desactiva la dark web. |
+| `--darkweb / --no-darkweb` | Activa/desactiva la monitorización de exposición (brechas, Ahmia, pastes). |
+| `--tor` | Capa avanzada: crawling `.onion` vía Tor (requiere Tor en `:9050`). Desactivada por defecto. |
 | `--no-active` | Omite la verificación ICMP/TCP. |
 | `--no-diff` | No compara con el escaneo anterior (desactiva la monitorización). |
 | `-t, --threads` | Hilos concurrentes (def: 30). |
@@ -336,7 +352,8 @@ OSINT-Prototype/
     ├── incibe.py                # Integración con INCIBE-CERT (alerta temprana)
     ├── diffing.py               # Modo monitorización: compara con el escaneo anterior
     ├── diagnostics.py           # Estado de API keys y herramientas
-    ├── darkweb_monitor.py       # Dark web (Tor) + crawling
+    ├── exposure.py              # Monitorización de exposición: brechas + Ahmia + pastes + Tor
+    ├── darkweb_monitor.py       # Capa Tor (.onion) usada por exposure.py
     └── report.py                # Informes JSON / CSV / Markdown / HTML
 ```
 

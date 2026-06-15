@@ -452,17 +452,41 @@ class ReportGenerator:
 
         # ==================== DARK WEB ====================
         md_content += f"""
-## 🌑 Monitorización en Dark Web (Tor)
+## 🛡️ Monitorización de Exposición y Filtraciones
 
 """
         dw = threat_data.get('darkweb', {})
         if dw.get('status') == 'error':
             md_content += f"⚠️ **Error:** {dw.get('message', 'Desconocido')}\n"
         elif dw.get('status') == 'skipped':
-            md_content += "⏩ Búsqueda en Dark Web omitida por el usuario.\n"
+            md_content += "⏩ Monitorización de exposición omitida por el usuario.\n"
         elif dw.get('status') == 'success':
-            md_content += f"- **Palabra clave:** `{dw.get('keyword', 'N/A')}`\n"
-            md_content += f"- **Enlaces .onion encontrados (búsqueda multi-motor):** {dw.get('total_links_found', 0)}\n\n"
+            summary = dw.get('summary', {})
+            md_content += f"- **Nivel de exposición:** {summary.get('nivel_exposicion', 'N/A')}\n"
+            md_content += f"- **Correos comprometidos:** {summary.get('emails_comprometidos', 0)}\n"
+            md_content += f"- **Menciones en .onion (Ahmia):** {summary.get('menciones_onion', 0)}\n"
+            md_content += f"- **Pastes encontrados:** {summary.get('pastes', 0)}\n\n"
+
+            # Capa 1: brechas de datos (lo más accionable)
+            breaches = dw.get('breaches', {})
+            comprometidos = [r for r in breaches.get('results', []) if r.get('found')]
+            if comprometidos:
+                md_content += "#### 📧 Correos en filtraciones conocidas\n\n"
+                md_content += "| Email | Brechas |\n|-------|--------|\n"
+                for r in comprometidos:
+                    md_content += f"| `{r.get('email','')}` | {', '.join(r.get('breaches', [])[:8])} |\n"
+                md_content += "\n"
+
+            # Capa 3: pastes
+            pastes = dw.get('pastes', {}).get('pastes', [])
+            if pastes:
+                md_content += "#### 📋 Menciones en paste sites (PSBDMP)\n\n"
+                md_content += "| Fecha | Enlace |\n|-------|--------|\n"
+                for p in pastes[:20]:
+                    md_content += f"| {p.get('date','')} | `{p.get('url','')}` |\n"
+                md_content += "\n"
+
+            md_content += f"#### 🌑 Índice dark web (Ahmia): {dw.get('total_links_found', 0)} enlace(s) .onion\n\n"
             raw_results = dw.get('raw_results', [])
             if raw_results:
                 md_content += "#### 🔎 Resultados de búsqueda (primeros 20)\n\n"

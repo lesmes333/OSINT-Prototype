@@ -50,7 +50,11 @@ def parse_args(argv=None):
     )
     p.add_argument(
         "--darkweb", action=argparse.BooleanOptionalAction, default=None,
-        help="Activar/desactivar monitorización en dark web (requiere Tor).",
+        help="Activar/desactivar monitorización de exposición (brechas, Ahmia, pastes).",
+    )
+    p.add_argument(
+        "--tor", action="store_true",
+        help="Capa avanzada: crawling .onion vía Tor (requiere Tor en :9050). Desactivada por defecto.",
     )
     p.add_argument("--no-active", action="store_true", help="Omitir verificación ICMP/TCP de hosts.")
     p.add_argument("--no-diff", action="store_true", help="No comparar con el escaneo anterior (modo monitorización).")
@@ -194,18 +198,29 @@ def analyze_domain(domain, args, do_fp, do_dw):
         threat_results["fingerprinting"] = {"status": "skipped"}
         threat_results["vulnerabilities"] = {"status": "skipped"}
 
-    # --- FASE 4: dark web ---
+    # --- FASE 4: monitorización de exposición y filtraciones ---
     if do_dw:
-        ui.phase("FASE 4", "MONITORIZACIÓN EN DARK WEB (Tor)", "Búsqueda multi-motor + crawling de enlaces .onion")
-        from scripts.modules.darkweb_monitor import DarkWebMonitor
+        ui.phase("FASE 4", "MONITORIZACIÓN DE EXPOSICIÓN Y FILTRACIONES",
+                 "Brechas (XposedOrNot/HIBP) · Índice dark web (Ahmia) · Paste sites" +
+                 (" · Tor" if args.tor else ""))
+        from scripts.modules.exposure import ExposureMonitor
+
+        # Correos a vigilar: los que descubre Hunter + la lista manual de .env.
+        emails = []
+        hunter = threat_results.get("hunter", {})
+        if isinstance(hunter, dict):
+            emails += [e.get("value", "") for e in hunter.get("emails", []) if e.get("value")]
+        emails += [e for e in os.getenv("MONITOR_EMAILS", "").replace(";", ",").split(",") if e.strip()]
 
         try:
-            with ui.progress_status("Conectando a Tor y rastreando la dark web…"):
-                threat_results["darkweb"] = DarkWebMonitor(domain).run_all()
-            ui.table_darkweb(threat_results["darkweb"])
+            with ui.progress_status("Consultando brechas, índices de dark web y paste sites…"):
+                threat_results["darkweb"] = ExposureMonitor(
+                    domain, emails=emails, run_tor=args.tor, threads=args.threads
+                ).run_all()
+            ui.table_exposure(threat_results["darkweb"])
         except Exception as e:  # noqa: BLE001
             threat_results["darkweb"] = {"status": "error", "message": str(e)}
-            ui.error(f"Dark web: {e}")
+            ui.error(f"Monitorización de exposición: {e}")
     else:
         threat_results["darkweb"] = {"status": "skipped"}
 

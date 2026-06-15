@@ -321,6 +321,47 @@ def table_cves(vuln: Dict):
                 _plain(f"  {cve.get('id')} [{cve.get('severity')}] {tech['technology']}  INCIBE:{inc}")
 
 
+def table_exposure(dw: Dict):
+    """Resumen de la monitorización de exposición y filtraciones (Fase 4)."""
+    if not isinstance(dw, dict) or dw.get("status") != "success":
+        return
+    summary = dw.get("summary", {})
+    breaches = dw.get("breaches", {})
+    ahmia = dw.get("ahmia", {})
+    pastes = dw.get("pastes", {})
+    nivel = summary.get("nivel_exposicion", "LOW")
+    nivel_style = {"HIGH": "bold red", "MEDIUM": "yellow", "LOW": "green"}.get(nivel, "dim")
+
+    if _RICH:
+        console.print(f"[bold]🛡️  Exposición:[/] nivel ", end="")
+        console.print(Text(nivel, style=nivel_style))
+        t = Table(title="Monitorización de exposición y filtraciones", box=box.SIMPLE, header_style="bold magenta")
+        t.add_column("Capa", style="cyan")
+        t.add_column("Hallazgos", style="white")
+        t.add_row("Brechas de datos",
+                  f"{breaches.get('compromised_emails', 0)} email(s) comprometido(s) "
+                  f"de {breaches.get('checked_emails', 0)} revisados")
+        t.add_row("Índice dark web (Ahmia)", f"{ahmia.get('total', 0)} mención(es) en .onion")
+        t.add_row("Paste sites (PSBDMP)", f"{pastes.get('total', 0)} paste(s)")
+        if dw.get("tor", {}).get("status") == "success":
+            t.add_row("Tor (.onion crawl)", f"{len(dw.get('analyzed_threats', []))} analizado(s)")
+        console.print(t)
+
+        # Detalle de emails comprometidos (lo más accionable)
+        comprometidos = [r for r in breaches.get("results", []) if r.get("found")]
+        if comprometidos:
+            bt = Table(title="📧 Correos en filtraciones", box=box.SIMPLE, header_style="bold red")
+            bt.add_column("Email", style="yellow")
+            bt.add_column("Brechas", style="white")
+            for r in comprometidos[:15]:
+                bt.add_row(r.get("email", ""), ", ".join(r.get("breaches", [])[:6]))
+            console.print(bt)
+    else:
+        _plain(f"\nExposición: nivel {nivel} | "
+               f"{breaches.get('compromised_emails', 0)} emails comprometidos | "
+               f"{ahmia.get('total', 0)} .onion | {pastes.get('total', 0)} pastes")
+
+
 def table_darkweb(dw: Dict):
     if not isinstance(dw, dict) or dw.get("status") != "success":
         return
