@@ -105,6 +105,19 @@ cp darkweb_onions.example.json darkweb_onions.json
 
 > 💡 **Leak sites de ransomware** (LockBit, Akira, RansomHub, CL0P, Black Basta…): **no hay que configurar nada** — se obtienen dinámicamente de la API de `ransomware.live` (80+ grupos activos, autoactualizada) y se crawlean vía Tor.
 
+### 📨 Monitorización de Telegram
+
+Telegram es una de las fuentes más activas de leaks. La herramienta vigila **14 canales públicos** de brechas/combolists (más los que añadas) accediendo a su histórico web (`t.me/s/{canal}`, sin login):
+
+- Busca el dominio en el **histórico** del canal con su buscador nativo (`?q=`), no solo en los mensajes recientes.
+- Parsea **cada mensaje** coincidente (con su **fecha** y **permalink**) y le aplica el **extractor de IOCs** → credenciales, emails, IPs, hashes, etc. por mensaje.
+- **Añade tus propios canales** con la variable `TELEGRAM_CHANNELS` en `.env` (acepta `@canal`, `canal` o `t.me/canal`, separados por comas):
+  ```bash
+  TELEGRAM_CHANNELS="@leakzone, t.me/breach_db, micanal"
+  ```
+
+En el informe HTML los mensajes aparecen con fecha y enlace directo al post.
+
 ### 🥷 OPSEC y resiliencia (Tor)
 
 El acceso a `.onion` es sigiloso y tolerante a fallos (`tor_utils.py`):

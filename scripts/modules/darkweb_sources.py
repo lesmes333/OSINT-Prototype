@@ -16,6 +16,7 @@ Todos los accesos son pasivos y defensivos: solo se lee contenido público
 indexado. No se interactúa con sistemas objetivo ni formularios de login.
 """
 
+import os
 import re
 import time
 from typing import Dict, List, Tuple
@@ -31,6 +32,7 @@ from .tor_utils import (
     request_with_retry,
     pick_user_agent,
 )
+from .ioc_extractor import extract_iocs
 
 log = get_logger()
 
@@ -751,53 +753,114 @@ def search_paste_sites(domain: str, use_tor: bool = False) -> List[Dict]:
 # F) CANALES TELEGRAM PÚBLICOS DE LEAKS/BRECHAS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def search_telegram_leak_channels(domain: str) -> List[Dict]:
+def _telegram_channels() -> List[str]:
     """
-    Busca menciones del dominio en canales públicos de Telegram conocidos
-    por publicar dumps de credenciales y filtraciones.
-    Accede via t.me/s/{channel} (web pública, sin autenticación).
+    Lista de canales a vigilar: los conocidos + los definidos por el operador en
+    la variable de entorno TELEGRAM_CHANNELS (separados por comas/espacios).
+    Acepta '@canal', 'canal' o 't.me/canal'.
+    """
+    extra_raw = os.getenv("TELEGRAM_CHANNELS", "")
+    extra = []
+    for tok in re.split(r"[,;\s]+", extra_raw):
+        tok = tok.strip()
+        tok = re.sub(r"^(https?://)?t\.me/(s/)?", "", tok)  # t.me/s/x, https://t.me/x → x
+        tok = tok.lstrip("@").strip("/")
+        if tok:
+            extra.append(tok)
+    return list(dict.fromkeys(TELEGRAM_LEAK_CHANNELS + extra))
+
+
+def _parse_telegram_messages(html: str, channel: str) -> List[Dict]:
+    """
+    Extrae los mensajes individuales de la vista web de un canal (t.me/s/{channel}).
+
+    Cada mensaje en esa vista es un <div class="tgme_widget_message"> con su texto
+    en <div class="tgme_widget_message_text">, su permalink en el enlace de fecha
+    y la fecha en <time datetime=...>. Devuelve [{text, link, fecha}].
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    mensajes: List[Dict] = []
+    for wrap in soup.select("div.tgme_widget_message"):
+        text_el = wrap.select_one("div.tgme_widget_message_text")
+        if not text_el:
+            continue
+        text = text_el.get_text(" ", strip=True)
+        if not text:
+            continue
+        date_el = wrap.select_one("a.tgme_widget_message_date")
+        link = date_el.get("href", "") if date_el else f"https://t.me/s/{channel}"
+        time_el = wrap.select_one("time[datetime]")
+        fecha = (time_el.get("datetime", "")[:10] if time_el else "")
+        mensajes.append({"text": text, "link": link, "fecha": fecha})
+    return mensajes
+
+
+def search_telegram_leak_channels(domain: str, max_msgs_per_channel: int = 6) -> List[Dict]:
+    """
+    Busca menciones del dominio en canales públicos de Telegram de leaks/brechas
+    y extrae los IOCs de CADA mensaje coincidente.
+
+    Para cada canal usa el buscador nativo de la vista web (t.me/s/{channel}?q=)
+    con varios términos (dominio y dominio+keyword), parsea los mensajes que
+    realmente mencionan el dominio, los deduplica por permalink y les aplica el
+    extractor de IOCs. Acceso 100% público, sin autenticación.
+
+    Los canales se toman de TELEGRAM_LEAK_CHANNELS + la variable de entorno
+    TELEGRAM_CHANNELS (ver _telegram_channels).
     """
     hits = []
     variants = _domain_variants(domain)
+    channels = _telegram_channels()
 
     def _check_channel(channel):
-        channel_hits = []
+        channel_hits: List[Dict] = []
+        seen_links: set = set()
         sess = _tu_clearnet_session()
-        # Buscar en el histórico del canal con el buscador nativo (?q=), no solo
-        # leer los mensajes recientes. Se prueba el dominio y dominio+keyword.
+        # Histórico del canal con el buscador nativo (?q=), no solo lo reciente.
         search_terms = [domain, f"{domain} leak", f"{domain} dump"]
         for term in search_terms:
+            if len(channel_hits) >= max_msgs_per_channel:
+                break
             url = f"https://t.me/s/{channel}?q={quote_plus(term)}"
             r = request_with_retry(sess, url, timeout=15, retries=1,
                                    rotate_circuit_on_fail=False,
                                    accept_status=(200,))
             if r is None:
                 continue
-            text = r.text.lower()
-            for variant in variants[:2]:
-                if variant.lower() in text:
-                    idx = text.find(variant.lower())
-                    ctx = r.text[max(0, idx-100):idx+200]
-                    ctx_clean = re.sub(r"<[^>]+>", " ", ctx)
-                    ctx_clean = re.sub(r"\s+", " ", ctx_clean).strip()[:200]
-                    channel_hits.append({
-                        "fuente":   f"telegram/{channel}",
-                        "variante": variant,
-                        "query":    term,
-                        "url":      url,
-                        "extracto": ctx_clean,
-                        "via_tor":  False,
-                    })
-                    return channel_hits  # un hit por canal basta
+            for msg in _parse_telegram_messages(r.text, channel):
+                low = msg["text"].lower()
+                matched = next((v for v in variants[:3] if v.lower() in low), None)
+                if not matched:
+                    continue
+                if msg["link"] in seen_links:
+                    continue
+                seen_links.add(msg["link"])
+                extracto = re.sub(r"\s+", " ", msg["text"]).strip()[:400]
+                iocs = {k: sorted(v) for k, v in
+                        extract_iocs(msg["text"], domain).items() if v}
+                channel_hits.append({
+                    "fuente":   f"telegram/{channel}",
+                    "canal":    channel,
+                    "variante": matched,
+                    "query":    term,
+                    "url":      msg["link"],
+                    "fecha":    msg["fecha"],
+                    "extracto": extracto,
+                    "iocs":     iocs,
+                    "via_tor":  False,
+                })
+                if len(channel_hits) >= max_msgs_per_channel:
+                    break
         return channel_hits
 
-    for _, result in run_parallel(_check_channel, TELEGRAM_LEAK_CHANNELS,
-                                   max_workers=4, label="telegram"):
+    for _, result in run_parallel(_check_channel, channels,
+                                   max_workers=6, label="telegram"):
         if isinstance(result, list):
             hits.extend(result)
 
     if hits:
-        log.info("   [+] Telegram: %d menciones encontradas en canales públicos", len(hits))
+        log.info("   [+] Telegram: %d mensajes con menciones en %d canales",
+                 len(hits), len(channels))
     return hits
 
 

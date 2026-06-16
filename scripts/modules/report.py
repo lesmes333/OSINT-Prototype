@@ -1110,15 +1110,22 @@ class ReportGenerator:
             # Telegram
             tg_hits_list = ds_dw.get('telegram_hits', [])
             if tg_hits_list:
+                def _tg_msg_cell(h):
+                    extracto = escape(h.get('extracto', '')[:120])
+                    link = h.get('url', '')
+                    if link.startswith('http'):
+                        return f"<a href='{escape(link)}' target='_blank'>{extracto}</a>"
+                    return f"<span class='muted'>{extracto}</span>"
                 tgrows = "".join(
                     f"<tr><td>{escape(h.get('fuente',''))}</td>"
+                    f"<td class='muted'>{escape(h.get('fecha','') or '—')}</td>"
                     f"<td><code>{escape(h.get('variante',''))}</code></td>"
-                    f"<td class='muted'>{escape(h.get('extracto','')[:80])}</td></tr>"
-                    for h in tg_hits_list[:8]
+                    f"<td>{_tg_msg_cell(h)}</td></tr>"
+                    for h in tg_hits_list[:12]
                 )
                 c6_section += (
-                    f"<p><b>⚠️ {len(tg_hits_list)} menciones en canales Telegram públicos:</b></p>"
-                    f"<table><thead><tr><th>Canal</th><th>Variante</th><th>Extracto</th></tr></thead>"
+                    f"<p><b>⚠️ {len(tg_hits_list)} mensajes con menciones en canales Telegram públicos:</b></p>"
+                    f"<table><thead><tr><th>Canal</th><th>Fecha</th><th>Variante</th><th>Mensaje (enlace)</th></tr></thead>"
                     f"<tbody>{tgrows}</tbody></table>"
                 )
 
