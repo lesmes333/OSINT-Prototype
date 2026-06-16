@@ -129,9 +129,10 @@ class ExposureMonitor:
             return {"breaches": [], "count": 0, "emails": []}
 
     def _leakcheck_domain(self) -> List[Dict]:
-        """LeakCheck.io: busca credenciales filtradas por dominio.
-        Plan gratuito: 5 búsquedas/día con LEAKCHECK_API_KEY (registro gratis en leakcheck.io).
-        Devuelve emails, contraseñas y fuente de la brecha."""
+        """LeakCheck.io: busca credenciales filtradas por dominio (API v2).
+        OJO: la búsqueda por dominio de la API v2 NO está en el plan gratuito;
+        requiere un plan de pago activo (devuelve 403 'Active plan required' si
+        la cuenta es gratuita). Con plan activo, devuelve emails/contraseñas/fuente."""
         if not self.leakcheck_key:
             return []
         results = []
@@ -143,11 +144,23 @@ class ExposureMonitor:
                 timeout=20,
             )
             if r.status_code == 401:
-                log.debug("LeakCheck: clave inválida")
-                return []
+                log.debug("LeakCheck: clave inválida o caducada")
+                return [{"error": "auth", "message": "LeakCheck: clave inválida o caducada"}]
             if r.status_code == 403:
-                log.debug("LeakCheck: límite diario alcanzado (5/día en plan free)")
-                return [{"error": "rate_limit", "message": "Límite diario de LeakCheck (5/día) alcanzado"}]
+                # No es un límite de uso: la cuenta no tiene plan de pago activo,
+                # que es lo que exige la búsqueda por dominio de la API v2.
+                msg = "LeakCheck: la búsqueda por dominio (API v2) requiere un plan de pago"
+                try:
+                    api_err = (r.json() or {}).get("error", "")
+                    if api_err:
+                        msg = f"LeakCheck: '{api_err}' — la API v2 por dominio requiere plan de pago"
+                except ValueError:
+                    pass
+                log.debug(msg)
+                return [{"error": "plan_required", "message": msg}]
+            if r.status_code == 429:
+                log.debug("LeakCheck: límite de peticiones alcanzado")
+                return [{"error": "rate_limit", "message": "LeakCheck: límite de peticiones alcanzado"}]
             if r.status_code != 200:
                 return []
             data = r.json()

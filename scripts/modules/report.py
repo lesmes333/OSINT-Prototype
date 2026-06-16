@@ -87,16 +87,20 @@ class ReportGenerator:
     Los archivos se guardan en una carpeta (por defecto 'outputs').
     """
 
-    def __init__(self, output_dir: str = "outputs", dominio: str = None):
+    def __init__(self, output_dir: str = "outputs", dominio: str = None,
+                 timestamp: str = None):
         self.output_dir = output_dir
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Sello de tiempo europeo (día-mes-año) para los nombres de archivo,
+        # más legible. Se puede inyectar desde fuera para que todos los archivos
+        # del mismo escaneo (json/csv/md/html/iocs) compartan exactamente el sello.
+        self.timestamp = timestamp or datetime.now().strftime("%d-%m-%Y_%Hh%M")
         self.dominio_slug = dominio.replace('.', '_') if dominio else "unknown"
         import os
         os.makedirs(output_dir, exist_ok=True)
 
     def to_json(self, data: Dict, filename: str = None) -> str:
         if filename is None:
-            filename = f"{self.output_dir}/activos_{self.dominio_slug}_{self.timestamp}.json"
+            filename = f"{self.output_dir}/{self.dominio_slug}_activos_{self.timestamp}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         print(f"[✓] JSON guardado en: {filename}")
@@ -104,7 +108,7 @@ class ReportGenerator:
 
     def to_csv(self, subdomains: List[str], filename: str = None, sources: Dict = None) -> str:
         if filename is None:
-            filename = f"{self.output_dir}/subdominios_{self.dominio_slug}_{self.timestamp}.csv"
+            filename = f"{self.output_dir}/{self.dominio_slug}_subdominios_{self.timestamp}.csv"
         sources = sources or {}
         with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -118,7 +122,7 @@ class ReportGenerator:
     def to_markdown(self, discovery_data: Dict, threat_data: Dict, diagnostics: Dict = None, filename: str = None) -> str:
         activos_info = discovery_data.get('activos', {})
         if filename is None:
-            filename = f"{self.output_dir}/informe_{self.dominio_slug}_{self.timestamp}.md"
+            filename = f"{self.output_dir}/{self.dominio_slug}_informe_{self.timestamp}.md"
 
         # Contar APIs exitosas/fallidas
         apis_ok = 0
@@ -837,7 +841,7 @@ class ReportGenerator:
         from html import escape
 
         if filename is None:
-            filename = f"{self.output_dir}/informe_{self.dominio_slug}_{self.timestamp}.html"
+            filename = f"{self.output_dir}/{self.dominio_slug}_informe_{self.timestamp}.html"
 
         domain = discovery_data.get('domain', 'N/D')
         activos = discovery_data.get('activos', {}).get('resumen', {})
@@ -1269,7 +1273,7 @@ class ReportGenerator:
                     f"<h3>🔎 IOCs detectados ({ioc_total})</h3>"
                     f"<p>{chips}</p>"
                     f"<p class='muted'>Exportados también a "
-                    f"<code>iocs_&lt;dominio&gt;_&lt;fecha&gt;.json</code> / "
+                    f"<code>&lt;dominio&gt;_iocs_&lt;fecha&gt;.json</code> / "
                     f"<code>.csv</code>. Se muestran hasta 50 por tipo.</p>"
                     f"{tablas}"
                 )
@@ -1411,12 +1415,77 @@ class ReportGenerator:
             if st.get('total', 0) > 120:
                 extra = (f"<p class='muted'>Mostrando 120 de {st.get('total', 0)} entidades "
                          f"(ordenadas por confianza). Todas en el JSON.</p>")
+
+            # ── Grafo visual interactivo (vis-network) ────────────────────────
+            # Se dibuja DENTRO del propio .html: nodos = entidades, aristas =
+            # relaciones, color = grado de confianza. La librería se carga por
+            # CDN; si no hay conexión, aparece un aviso y queda la tabla de abajo
+            # (que tiene los mismos datos). Cap de nodos para que sea fluido.
+            GRAPH_CAP = 250
+            _gcolor = {"A": "#3fb950", "B": "#58a6ff", "C": "#d29922", "D": "#8b949e"}
+            ents_g = ent['entities'][:GRAPH_CAP]
+            id_of, nodes_g = {}, []
+            for i, e in enumerate(ents_g):
+                key = (e.get('type', ''), e.get('value', ''))
+                id_of[key] = i
+                nodes_g.append({
+                    "id": i,
+                    "label": str(e.get('value', ''))[:26],
+                    "title": f"{e.get('type','')}: {e.get('value','')} · grado "
+                             f"{e.get('grade','?')} · {e.get('n_sources',0)} fuente(s)",
+                    "color": _gcolor.get(e.get('grade'), "#8b949e"),
+                    "group": e.get('type', ''),
+                })
+            edges_g = []
+            for r in ent.get('relations', []) or []:
+                fk = (r.get('from', {}).get('type', ''), r.get('from', {}).get('value', ''))
+                tk = (r.get('to', {}).get('type', ''), r.get('to', {}).get('value', ''))
+                if fk in id_of and tk in id_of:
+                    edges_g.append({"from": id_of[fk], "to": id_of[tk],
+                                    "label": str(r.get('rel', '')), "arrows": "to"})
+
+            graph_block = ""
+            if len(nodes_g) >= 2:
+                # Evitar que un valor con "</script>" rompa el documento.
+                nodes_json = json.dumps(nodes_g, ensure_ascii=False).replace("</", "<\\/")
+                edges_json = json.dumps(edges_g, ensure_ascii=False).replace("</", "<\\/")
+                cap_txt = (f" (mostrando {len(nodes_g)} de {st.get('total', 0)} entidades)"
+                           if st.get('total', 0) > len(nodes_g) else "")
+                graph_block = (
+                    "<div id='entgraph' style='height:520px;border:1px solid var(--border);"
+                    "border-radius:8px;background:var(--panel2);margin:12px 0;'>"
+                    "<p style='padding:1em;color:#8b949e'>Cargando grafo…</p></div>"
+                    f"<p class='muted'>Grafo interactivo{cap_txt}: arrastra los nodos y haz "
+                    "zoom con la rueda. Color = grado de confianza "
+                    "(<span style='color:#3fb950'>■</span> A · "
+                    "<span style='color:#58a6ff'>■</span> B · "
+                    "<span style='color:#d29922'>■</span> C · "
+                    "<span style='color:#8b949e'>■</span> D).</p>"
+                    "<script src='https://unpkg.com/vis-network@9.1.9/standalone/umd/"
+                    "vis-network.min.js'></script>"
+                    "<script>(function(){var c=document.getElementById('entgraph');"
+                    "if(!window.vis){c.innerHTML="
+                    "'<p style=\"padding:1em;color:#8b949e\">No se pudo cargar la librería del "
+                    "grafo (¿sin conexión?). La tabla de abajo tiene los mismos datos.</p>';"
+                    "return;}c.innerHTML='';"
+                    f"var nodes=new vis.DataSet({nodes_json});"
+                    f"var edges=new vis.DataSet({edges_json});"
+                    "new vis.Network(c,{nodes:nodes,edges:edges},{"
+                    "nodes:{shape:'dot',size:12,font:{color:'#e6edf3',size:12}},"
+                    "edges:{color:{color:'#2d3543',highlight:'#58a6ff'},"
+                    "font:{color:'#8b949e',size:10,strokeWidth:0},smooth:false},"
+                    "physics:{stabilization:true,barnesHut:{gravitationalConstant:-8000,"
+                    "springLength:120}},interaction:{hover:true,tooltipDelay:120}});"
+                    "})();</script>"
+                )
+
             entities_section = (
                 f"<section><h2>🕸️ Entidades correlacionadas ({st.get('total', 0)})</h2>"
                 f"<p class='muted'>Todo lo hallado, normalizado a entidades con un "
                 f"<b>grado de confianza</b> según cuántas fuentes (y de qué fiabilidad) lo "
                 f"corroboran. {st.get('relations', 0)} relaciones detectadas.</p>"
                 f"<p>{grade_chips}</p><p>{type_chips}</p>{mem_chip}"
+                f"{graph_block}"
                 f"<table><thead><tr><th>Tipo</th><th>Valor</th><th>Confianza</th>"
                 f"<th>Visto</th><th>#Fuentes</th><th>Fuentes</th></tr></thead>"
                 f"<tbody>{ent_rows}</tbody></table>{extra}"

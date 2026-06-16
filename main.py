@@ -142,6 +142,21 @@ def analyze_domain(domain, args, do_fp, do_dw):
 
     start = time.time()
 
+    # --- Identidad del escaneo: slug del dominio + sellos de tiempo ---
+    # Dos formatos a propósito:
+    #   · run_ts  → ISO ordenable, para la BD/persistencia (intel.db) y el JSON.
+    #   · stamp   → europeo (día-mes-año) para los NOMBRES de archivo y la carpeta,
+    #               más legible para una persona. El orden cronológico de los
+    #               informes NO depende de este nombre (diffing usa fecha de
+    #               modificación), así que usar dd-mm-aaaa aquí es seguro.
+    slug = domain.replace(".", "_")
+    run_ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    stamp = time.strftime("%d-%m-%Y_%Hh%M")
+    # Cada escaneo en su propia subcarpeta: outputs/<dominio>_<dd-mm-aaaa_HHhMM>/
+    # (intel.db y los logs siguen en la raíz de outputs/, son acumulativos).
+    scan_dir = os.path.join(args.output_dir, f"{slug}_{stamp}")
+    os.makedirs(scan_dir, exist_ok=True)
+
     # --- FASE 1: descubrimiento (+ actividad) ---
     ui.phase("FASE 1", "DESCUBRIMIENTO DE ACTIVOS", "Subdominios (9 fuentes en paralelo) · DNS · WHOIS · actividad ICMP/TCP")
     discovery = PassiveDiscovery(domain, threads=args.threads)
@@ -236,7 +251,7 @@ def analyze_domain(domain, args, do_fp, do_dw):
             ioc_result = dw.get("iocs", {})
             if ioc_result.get("total"):
                 from scripts.modules.ioc_extractor import export_iocs
-                dw["ioc_files"] = export_iocs(ioc_result, args.output_dir, domain)
+                dw["ioc_files"] = export_iocs(ioc_result, scan_dir, domain, timestamp=stamp)
             out["darkweb"] = dw
         except Exception as e:  # noqa: BLE001
             out["darkweb"] = {"status": "error", "message": str(e)}
@@ -292,7 +307,6 @@ def analyze_domain(domain, args, do_fp, do_dw):
     if not args.no_diff:
         from scripts.modules import diffing
 
-        slug = domain.replace(".", "_")
         current_snapshot = {
             "dominio_analizado": domain,
             "discovery": discovery_results,
@@ -302,7 +316,6 @@ def analyze_domain(domain, args, do_fp, do_dw):
         ui.table_changes(changes)
 
     # --- CORRELACIÓN: grafo de entidades + confidence scoring ---
-    run_ts = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         from scripts.modules.entities import build_entity_graph
         graph = build_entity_graph(domain, discovery_results, threat_results)
@@ -314,9 +327,9 @@ def analyze_domain(domain, args, do_fp, do_dw):
         threat_results["entities"] = {"status": "error", "message": str(e)}
 
     # --- FASE 3: informes ---
-    ui.phase("FASE 3", "GENERACIÓN DE INFORMES", f"Formatos: {args.formats} → {args.output_dir}/")
+    ui.phase("FASE 3", "GENERACIÓN DE INFORMES", f"Formatos: {args.formats} → {scan_dir}/")
     formats = {f.strip() for f in args.formats.split(",") if f.strip()}
-    reporter = ReportGenerator(args.output_dir, domain)
+    reporter = ReportGenerator(scan_dir, domain, timestamp=stamp)
     if "json" in formats:
         reporter.to_json(
             {

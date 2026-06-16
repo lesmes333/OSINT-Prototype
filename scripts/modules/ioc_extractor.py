@@ -312,13 +312,13 @@ def export_iocs(ioc_result: Dict, output_dir: str, domain: str,
         log.debug("export_iocs: sin IOCs que exportar")
         return {}
 
-    ts = timestamp or time.strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or time.strftime("%d-%m-%Y_%Hh%M")
     safe_domain = domain.replace(".", "_")
     os.makedirs(output_dir, exist_ok=True)
     paths: Dict[str, str] = {}
 
     # ── JSON ──────────────────────────────────────────────────────────────────
-    json_path = os.path.join(output_dir, f"iocs_{safe_domain}_{ts}.json")
+    json_path = os.path.join(output_dir, f"{safe_domain}_iocs_{ts}.json")
     payload = {
         "domain": domain,
         "generated": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -334,7 +334,7 @@ def export_iocs(ioc_result: Dict, output_dir: str, domain: str,
         log.debug("export_iocs JSON: %s", e)
 
     # ── CSV (una fila por IOC) ──────────────────────────────────────────────────
-    csv_path = os.path.join(output_dir, f"iocs_{safe_domain}_{ts}.csv")
+    csv_path = os.path.join(output_dir, f"{safe_domain}_iocs_{ts}.csv")
     try:
         with open(csv_path, "w", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh)

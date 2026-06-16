@@ -26,12 +26,32 @@ CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 
 
 def _find_previous_report(output_dir: str, dominio_slug: str) -> Optional[str]:
-    """Devuelve la ruta del informe JSON más reciente para el dominio, o None."""
-    patron = os.path.join(output_dir, f"activos_{dominio_slug}_*.json")
-    ficheros = sorted(glob.glob(patron))
-    # El nombre incluye un timestamp ordenable (YYYYMMDD_HHMMSS), así que el
-    # último elemento del orden alfabético es el más reciente.
-    return ficheros[-1] if ficheros else None
+    """Devuelve la ruta del informe JSON (activos) más reciente del dominio, o None.
+
+    Busca tanto el layout actual (un escaneo = una subcarpeta
+    `<dominio>_<fecha>/<dominio>_activos_<fecha>.json`) como los nombres planos
+    antiguos en la raíz, y tolera ambos órdenes de nombre (dominio-primero y el
+    formato heredado `activos_<dominio>_*`).
+
+    El nombre de archivo ya NO se asume cronológicamente ordenable (la fecha es
+    europea dd-mm-aaaa), así que se ordena por FECHA DE MODIFICACIÓN del fichero,
+    que sí es fiable independientemente del formato del nombre.
+    """
+    patrones = [
+        # Layout actual: una subcarpeta por escaneo.
+        os.path.join(output_dir, "*", f"{dominio_slug}_activos_*.json"),
+        os.path.join(output_dir, "*", f"activos_{dominio_slug}_*.json"),
+        # Nombres planos en la raíz (compatibilidad con escaneos antiguos).
+        os.path.join(output_dir, f"{dominio_slug}_activos_*.json"),
+        os.path.join(output_dir, f"activos_{dominio_slug}_*.json"),
+    ]
+    ficheros = set()
+    for patron in patrones:
+        ficheros.update(glob.glob(patron))
+    if not ficheros:
+        return None
+    # El más recientemente escrito es el escaneo anterior.
+    return max(ficheros, key=os.path.getmtime)
 
 
 def _extract_snapshot(data: Dict) -> Dict[str, set]:
