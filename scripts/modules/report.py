@@ -11,8 +11,29 @@ Convierte los resultados del descubrimiento y threat intelligence en tres format
 
 import json
 import csv
+import os
 from datetime import datetime
 from typing import Dict, List
+
+# Librería del grafo vendorizada (scripts/assets/vis-network.min.js). Se inlina en
+# el HTML para que el informe sea un ÚNICO archivo que funciona SIN internet (clave
+# al abrirlo en otro equipo, p. ej. un Mac). Si el fichero no está, se cae al CDN.
+_VIS_NETWORK_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "vis-network.min.js")
+
+
+def _vis_network_loader() -> str:
+    """Devuelve el <script> que carga vis-network: inline si está vendorizado,
+    si no, etiqueta <script src=CDN> como respaldo."""
+    try:
+        with open(_VIS_NETWORK_PATH, "r", encoding="utf-8") as fh:
+            js = fh.read()
+        # Evitar que un '</script>' dentro de la librería cierre la etiqueta.
+        js = js.replace("</script>", "<\\/script>")
+        return f"<script>{js}</script>"
+    except OSError:
+        return ("<script src='https://unpkg.com/vis-network@9.1.9/standalone/umd/"
+                "vis-network.min.js'></script>")
 
 # Plantilla HTML autocontenida (CSS embebido, tema oscuro, sin dependencias externas)
 _HTML_TEMPLATE = """<!DOCTYPE html>
@@ -40,10 +61,10 @@ section{{background:var(--panel);border:1px solid var(--border);border-radius:12
 section h2{{margin:0 0 14px;font-size:19px;border-bottom:1px solid var(--border);padding-bottom:8px}}
 section h3{{font-size:15px;color:var(--muted);margin:18px 0 8px}}
 table{{width:100%;border-collapse:collapse;font-size:13.5px}}
-th,td{{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}}
+th,td{{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere;word-break:break-word}}
 th{{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}}
 tbody tr:hover{{background:var(--panel2)}}
-code{{background:#0b0f14;padding:1px 6px;border-radius:5px;font-size:12.5px;color:#79c0ff}}
+code{{background:#0b0f14;padding:1px 6px;border-radius:5px;font-size:12.5px;color:#79c0ff;word-break:break-all}}
 a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}}
 .muted{{color:var(--muted)}}
 .badge{{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:600}}
@@ -58,6 +79,17 @@ a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}
 .alert-inline{{color:#e3914b}}
 footer{{text-align:center;color:var(--muted);font-size:12.5px;padding:20px 0}}
 footer b{{color:var(--accent)}}
+html{{scroll-behavior:smooth}}
+section[id]{{scroll-margin-top:14px}}
+a.card{{text-decoration:none;color:inherit;display:block;transition:border-color .15s,transform .15s}}
+a.card:hover{{border-color:var(--accent);transform:translateY(-2px)}}
+a.card .lbl::after{{content:" ↗";opacity:.55;font-size:10px}}
+.tablewrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+.help{{background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px;color:var(--muted)}}
+.help b{{color:var(--txt)}}
+.gtoolbar{{display:flex;gap:6px;margin:10px 0 4px;flex-wrap:wrap}}
+.gtoolbar button{{background:var(--panel2);color:var(--txt);border:1px solid var(--border);border-radius:7px;padding:5px 11px;font-size:13px;cursor:pointer;font-family:inherit}}
+.gtoolbar button:hover{{border-color:var(--accent);color:var(--accent)}}
 </style></head>
 <body><div class="wrap">
 <header>
@@ -68,12 +100,12 @@ footer b{{color:var(--accent)}}
 <div class="cards">{cards}</div>
 {alert}
 {diag}
-<section><h2>🌐 Subdominios ({sub_total})</h2>
+<section id="sub"><h2>🌐 Subdominios ({sub_total})</h2>
 <table><thead><tr><th>#</th><th>Subdominio</th><th>Estado</th><th>Fuentes</th></tr></thead><tbody>{sub_rows}</tbody></table></section>
 <section><h2>🔍 Registros DNS</h2><table><tbody>{dns_rows}</tbody></table></section>
 <section><h2>🏢 WHOIS</h2><table><tbody>{whois_rows}</tbody></table></section>
 {ti_section}
-<section><h2>🧬 Tecnologías detectadas</h2><table><thead><tr><th>URL</th><th>Tecnologías</th></tr></thead><tbody>{tech_rows}</tbody></table></section>
+<section id="tech"><h2>🧬 Tecnologías detectadas</h2><div class="tablewrap"><table><thead><tr><th>URL</th><th>Tecnologías</th></tr></thead><tbody>{tech_rows}</tbody></table></div></section>
 {cve_section}
 {ew_section}
 {dw_section}
@@ -860,19 +892,20 @@ class ReportGenerator:
                 (sev or "").upper(), "unk")
 
         # ---- Tarjetas de resumen ----
+        # 4º campo = ancla de la sección a la que salta el card al hacer clic.
         cards = [
-            ("Subdominios", discovery_data.get('total_subdomains', 0), "blue"),
-            ("Hosts activos", f"{activos.get('activos', 0)}/{activos.get('total_hosts', 0)}" if activos else "—", "green"),
-            ("APIs OK", f"{diag.get('apis_ok', 0)}/{diag.get('apis_total', 0)}" if diag else "—", "cyan"),
-            ("Tecnologías", fp.get('total_technologies', 0) if fp.get('status') == 'success' else "—", "violet"),
-            ("CVEs", vuln.get('total_cves', 0) if vuln.get('status') == 'success' else "—", "red"),
-            ("Exploits", vuln.get('total_exploits', 0) if vuln.get('status') == 'success' else "—", "orange"),
-            ("Fichas INCIBE", vuln.get('incibe_refs', 0) if vuln.get('status') == 'success' else "—", "yellow"),
-            ("Enlaces .onion", dw.get('total_links_found', 0) if dw.get('status') == 'success' else "—", "gray"),
+            ("Subdominios", discovery_data.get('total_subdomains', 0), "blue", "sub"),
+            ("Hosts activos", f"{activos.get('activos', 0)}/{activos.get('total_hosts', 0)}" if activos else "—", "green", "sub"),
+            ("APIs OK", f"{diag.get('apis_ok', 0)}/{diag.get('apis_total', 0)}" if diag else "—", "cyan", "diag"),
+            ("Tecnologías", fp.get('total_technologies', 0) if fp.get('status') == 'success' else "—", "violet", "tech"),
+            ("CVEs", vuln.get('total_cves', 0) if vuln.get('status') == 'success' else "—", "red", "cve"),
+            ("Exploits", vuln.get('total_exploits', 0) if vuln.get('status') == 'success' else "—", "orange", "cve"),
+            ("Fichas INCIBE", vuln.get('incibe_refs', 0) if vuln.get('status') == 'success' else "—", "yellow", "cve"),
+            ("Enlaces .onion", dw.get('total_links_found', 0) if dw.get('status') == 'success' else "—", "gray", "darkweb"),
         ]
         cards_html = "".join(
-            f'<div class="card {c}"><div class="num">{escape(str(v))}</div><div class="lbl">{escape(t)}</div></div>'
-            for t, v, c in cards
+            f'<a class="card {c}" href="#{anchor}"><div class="num">{escape(str(v))}</div><div class="lbl">{escape(t)}</div></a>'
+            for t, v, c, anchor in cards
         )
 
         # ---- Aviso de claves a renovar ----
@@ -902,7 +935,7 @@ class ReportGenerator:
         diag_html = ""
         if diag:
             diag_html = f"""
-            <section><h2>🩺 Diagnóstico del escaneo</h2>
+            <section id="diag"><h2>🩺 Diagnóstico del escaneo</h2>
             <table><thead><tr><th>API</th><th>Estado</th><th>Acción recomendada</th></tr></thead><tbody>{api_rows}</tbody></table>
             <h3>Herramientas externas</h3>
             <table><thead><tr><th>Herramienta</th><th>Estado</th><th>Aporta</th><th>Cómo solucionarlo</th></tr></thead><tbody>{tool_rows}</tbody></table>
@@ -964,11 +997,11 @@ class ReportGenerator:
             )
         cve_section = ""
         if cve_rows:
-            cve_section = f"""<section><h2>🚨 Vulnerabilidades (CVEs)</h2>
+            cve_section = f"""<section id="cve"><h2>🚨 Vulnerabilidades (CVEs)</h2>
             <p class="muted">Total: {vuln.get('total_cves', 0)} · con exploit público: {vuln.get('total_exploits', 0)} · con ficha INCIBE-CERT: {vuln.get('incibe_refs', 0)}</p>
-            <table><thead><tr><th>CVE</th><th>Severidad</th><th>Tecnología</th><th>Descripción</th><th>Exploit</th><th>INCIBE-CERT</th></tr></thead><tbody>{cve_rows}</tbody></table></section>"""
+            <div class="tablewrap"><table><thead><tr><th>CVE</th><th>Severidad</th><th>Tecnología</th><th>Descripción</th><th>Exploit</th><th>INCIBE-CERT</th></tr></thead><tbody>{cve_rows}</tbody></table></div></section>"""
         elif fp.get('status') == 'success':
-            cve_section = '<section><h2>🚨 Vulnerabilidades (CVEs)</h2><p class="muted">No se encontraron CVEs asociados a las tecnologías con versión detectada.</p></section>'
+            cve_section = '<section id="cve"><h2>🚨 Vulnerabilidades (CVEs)</h2><p class="muted">No se encontraron CVEs asociados a las tecnologías con versión detectada.</p></section>'
 
         # ---- INCIBE alerta temprana ----
         ew = vuln.get('incibe_early_warning', []) if isinstance(vuln, dict) else []
@@ -977,9 +1010,9 @@ class ReportGenerator:
             f"<td>{escape(e.get('cvss_31') or e.get('cvss_40') or '—')}</td><td>{escape(e.get('fecha_publicacion', '—'))}</td>"
             f"<td><a href='{escape(e.get('url', ''))}' target='_blank'>ver ficha</a></td></tr>" for e in ew[:25]
         )
-        ew_section = f"""<section><h2>🇪🇸 Alerta Temprana INCIBE-CERT</h2>
+        ew_section = f"""<section id="incibe"><h2>🇪🇸 Alerta Temprana INCIBE-CERT</h2>
             <p class="muted">Vulnerabilidades recientes de INCIBE-CERT que mencionan las tecnologías detectadas.</p>
-            <table><thead><tr><th>CVE</th><th>Gravedad</th><th>CVSS</th><th>Fecha</th><th>Ficha</th></tr></thead><tbody>{ew_rows}</tbody></table></section>""" if ew_rows else ""
+            <div class="tablewrap"><table><thead><tr><th>CVE</th><th>Gravedad</th><th>CVSS</th><th>Fecha</th><th>Ficha</th></tr></thead><tbody>{ew_rows}</tbody></table></div></section>""" if ew_rows else ""
 
         # ---- Dark web / Exposición (todas las capas) ----
         dw_section = ""
@@ -1336,9 +1369,9 @@ class ReportGenerator:
                 health_section = (
                     f"<h3>🩺 Salud de los .onion vigilados ({len(onion_health)})</h3>"
                     f"{aviso}"
-                    f"<table><thead><tr><th>Servicio</th><th>Categoría</th><th>Estado</th>"
+                    f"<div class='tablewrap'><table><thead><tr><th>Servicio</th><th>Categoría</th><th>Estado</th>"
                     f"<th>.onion</th><th>Nota</th></tr></thead>"
-                    f"<tbody>{hrows}</tbody></table>"
+                    f"<tbody>{hrows}</tbody></table></div>"
                 )
 
             # ── Semillas .onion descubiertas (directorios tipo tortaxi) ───────
@@ -1353,14 +1386,20 @@ class ReportGenerator:
                 )
                 seeds_section = (
                     f"<h3>🌱 Semillas .onion descubiertas ({len(onion_seeds)})</h3>"
-                    f"<p class='muted'>Servicios Tor encontrados en directorios (descubrimiento, "
-                    f"no son menciones del dominio).</p>"
-                    f"<table><thead><tr><th>.onion</th><th>Título</th><th>Fuente</th></tr></thead>"
-                    f"<tbody>{seed_rows}</tbody></table>"
+                    f"<div class='help'>📚 <b>¿Qué es esto?</b> Algunos directorios de la dark web "
+                    f"(tipo <i>The Hidden Wiki</i>) listan servicios <code>.onion</code> activos. "
+                    f"Aquí guardamos los que aparecen en esos directorios para tener un catálogo de "
+                    f"direcciones actualizadas — los <code>.onion</code> cambian de dirección a menudo, "
+                    f"y así podemos refrescar los <i>leak sites</i> que vigilamos en "
+                    f"<code>darkweb_onions.json</code> cuando caen o rotan.<br>"
+                    f"⚠️ <b>No</b> son menciones de <b>{escape(domain)}</b>: es material de "
+                    f"<b>descubrimiento</b>, no una alerta sobre tu dominio.</div>"
+                    f"<div class='tablewrap'><table><thead><tr><th>.onion</th><th>Título</th><th>Fuente</th></tr></thead>"
+                    f"<tbody>{seed_rows}</tbody></table></div>"
                 )
 
             dw_section = (
-                f"<section><h2>🛡️ Exposición &amp; Dark Web</h2>"
+                f"<section id=\"darkweb\"><h2>🛡️ Exposición &amp; Dark Web</h2>"
                 f"{overview}"
                 f"{c1_section}{c2_section}{c3_section}{c4_section}{c6_section}{c5_section}"
                 f"{ioc_section}{pivot_section}{health_section}{seeds_section}"
@@ -1452,35 +1491,55 @@ class ReportGenerator:
                 cap_txt = (f" (mostrando {len(nodes_g)} de {st.get('total', 0)} entidades)"
                            if st.get('total', 0) > len(nodes_g) else "")
                 graph_block = (
+                    "<div class='help'>🕸️ <b>¿Para qué sirve este grafo?</b> Es un mapa visual "
+                    "de cómo se relacionan los hallazgos: cada <b>punto</b> es una entidad "
+                    "(un subdominio, una IP, una tecnología, un email…) y cada <b>línea</b> une "
+                    "entidades relacionadas (p. ej. un subdominio que resuelve a una IP). "
+                    "El <b>color</b> indica la confianza: "
+                    "<span style='color:#3fb950'>■</span> A (confirmado) · "
+                    "<span style='color:#58a6ff'>■</span> B (verificado) · "
+                    "<span style='color:#d29922'>■</span> C (una fuente) · "
+                    "<span style='color:#8b949e'>■</span> D (inferencia). "
+                    "Pasa el ratón por un punto para ver el detalle.<br>"
+                    "🖱️ <b>Cómo moverse:</b> <b>arrastra</b> un punto para moverlo, "
+                    "arrastra el fondo para desplazarte, y usa los botones "
+                    "<b>＋ / −</b> de aquí abajo para acercar/alejar "
+                    "(así no se mueve la página al hacer scroll).</div>"
+                    f"<p class='muted'>{cap_txt.strip() or 'Grafo interactivo de entidades.'}</p>"
+                    "<div class='gtoolbar'>"
+                    "<button type='button' onclick='entgraphZoom(1.3)'>＋ Acercar</button>"
+                    "<button type='button' onclick='entgraphZoom(0.77)'>− Alejar</button>"
+                    "<button type='button' onclick='entgraphFit()'>⤢ Ajustar todo</button>"
+                    "</div>"
                     "<div id='entgraph' style='height:520px;border:1px solid var(--border);"
-                    "border-radius:8px;background:var(--panel2);margin:12px 0;'>"
+                    "border-radius:8px;background:var(--panel2);margin:8px 0;'>"
                     "<p style='padding:1em;color:#8b949e'>Cargando grafo…</p></div>"
-                    f"<p class='muted'>Grafo interactivo{cap_txt}: arrastra los nodos y haz "
-                    "zoom con la rueda. Color = grado de confianza "
-                    "(<span style='color:#3fb950'>■</span> A · "
-                    "<span style='color:#58a6ff'>■</span> B · "
-                    "<span style='color:#d29922'>■</span> C · "
-                    "<span style='color:#8b949e'>■</span> D).</p>"
-                    "<script src='https://unpkg.com/vis-network@9.1.9/standalone/umd/"
-                    "vis-network.min.js'></script>"
+                    + _vis_network_loader() +
                     "<script>(function(){var c=document.getElementById('entgraph');"
                     "if(!window.vis){c.innerHTML="
                     "'<p style=\"padding:1em;color:#8b949e\">No se pudo cargar la librería del "
-                    "grafo (¿sin conexión?). La tabla de abajo tiene los mismos datos.</p>';"
+                    "grafo. La tabla de abajo tiene exactamente los mismos datos.</p>';"
                     "return;}c.innerHTML='';"
                     f"var nodes=new vis.DataSet({nodes_json});"
                     f"var edges=new vis.DataSet({edges_json});"
-                    "new vis.Network(c,{nodes:nodes,edges:edges},{"
+                    "var net=new vis.Network(c,{nodes:nodes,edges:edges},{"
                     "nodes:{shape:'dot',size:12,font:{color:'#e6edf3',size:12}},"
                     "edges:{color:{color:'#2d3543',highlight:'#58a6ff'},"
                     "font:{color:'#8b949e',size:10,strokeWidth:0},smooth:false},"
                     "physics:{stabilization:true,barnesHut:{gravitationalConstant:-8000,"
-                    "springLength:120}},interaction:{hover:true,tooltipDelay:120}});"
+                    "springLength:120}},"
+                    # dragNodes/dragView ON, zoomView OFF: en Mac el scroll de la rueda
+                    # o el trackpad NO secuestra la página; el zoom va por los botones.
+                    "interaction:{hover:true,tooltipDelay:120,dragNodes:true,"
+                    "dragView:true,zoomView:false}});"
+                    "net.once('stabilizationIterationsDone',function(){net.fit();});"
+                    "window.entgraphZoom=function(f){net.moveTo({scale:net.getScale()*f});};"
+                    "window.entgraphFit=function(){net.fit({animation:true});};"
                     "})();</script>"
                 )
 
             entities_section = (
-                f"<section><h2>🕸️ Entidades correlacionadas ({st.get('total', 0)})</h2>"
+                f"<section id=\"entidades\"><h2>🕸️ Entidades correlacionadas ({st.get('total', 0)})</h2>"
                 f"<p class='muted'>Todo lo hallado, normalizado a entidades con un "
                 f"<b>grado de confianza</b> según cuántas fuentes (y de qué fiabilidad) lo "
                 f"corroboran. {st.get('relations', 0)} relaciones detectadas.</p>"
