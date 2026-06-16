@@ -86,6 +86,25 @@ Los IOCs se incluyen en el informe JSON y, además, se exportan a archivos propi
 
 La búsqueda de fugas combina el dominio con vocabulario real de brecha en **inglés, español y ruso** (`generate_breach_queries()`): `leak`, `dump`, `database`, `combolist`, `filtracion`, `contraseñas`, `слив`, `база`, `дамп`… además de variantes con año, `www`, `@dominio` y patrones de fichero de dump. Esto saca a la luz dumps que no aparecen buscando solo el dominio.
 
+### 🗂️ Registro de foros y mercados (configurable)
+
+La búsqueda en foros de leaks (DarkForums, Dread, XSS.is, Exploit.in, BreachForums, BHF, DamageLib, Cracked.io, Nulled.to) y mercados de credenciales (Russian Market, Brian's Club, STYX, Abacus…) está **dirigida por datos** en `darkweb_forums.py`.
+
+**Por qué:** los foros cambian de dirección `.onion` constantemente (incautaciones, rebrandings, mirrors). Hardcodear direcciones que mañana estarán caídas solo genera timeouts y falsa cobertura. Por eso:
+
+- Los **metadatos estables** (nombre, idioma, tipo de contenido, mirror clearnet, si requiere login/Cloudflare) viven en el código.
+- Las **direcciones `.onion` volátiles** se cargan desde un archivo externo **`darkweb_onions.json`** (gitignored, nunca se sube) que tú rellenas con las direcciones verificadas actuales:
+
+```bash
+cp darkweb_onions.example.json darkweb_onions.json
+# edita darkweb_onions.json y pega las .onion actuales de cada foro
+# (o usa la variable DARKWEB_ONIONS_FILE para apuntar a otra ruta)
+```
+
+- Los foros **sin dirección configurada** se descubren igualmente por **menciones en los motores `.onion`** (Ahmia/Torch). Cada hit de foro pasa por el extractor de IOCs.
+
+> 💡 **Leak sites de ransomware** (LockBit, Akira, RansomHub, CL0P, Black Basta…): **no hay que configurar nada** — se obtienen dinámicamente de la API de `ransomware.live` (80+ grupos activos, autoactualizada) y se crawlean vía Tor.
+
 ### 🥷 OPSEC y resiliencia (Tor)
 
 El acceso a `.onion` es sigiloso y tolerante a fallos (`tor_utils.py`):
@@ -418,6 +437,7 @@ OSINT-Prototype/
     ├── exposure.py              # Fase 4: brechas · dark web (6 capas) · ransomware · LeakCheck · IOCs
     ├── darkweb_monitor.py       # Crawling .onion via Tor (Ahmia/Haystak/Torch + multi-motor)
     ├── darkweb_sources.py       # Capa 6: leak sites de ransomware · foros · infostealers · Telegram
+    ├── darkweb_forums.py        # Registro data-driven de foros/mercados (.onion desde config externa)
     ├── tor_utils.py             # OPSEC/resiliencia Tor: rotación UA · aislamiento de circuito · reintentos
     ├── ioc_extractor.py         # Extracción y export de IOCs (emails, credenciales, IPs, hashes, wallets…)
     └── report.py                # Informes JSON / CSV / Markdown / HTML

@@ -1,0 +1,17 @@
+{
+  "_comment": "Copia este archivo a 'darkweb_onions.json' (gitignored) y rellena las direcciones .onion ACTUALES y verificadas de cada foro. Las claves deben coincidir con el campo 'key' de FORUM_REGISTRY en scripts/modules/darkweb_forums.py. Puedes indicar 'onion' (lo habitual) y/o corregir 'clearnet'. Deja fuera los que no tengas: se descubrirán por menciones en los motores .onion.",
+
+  "darkforums":    { "onion": "", "clearnet": "" },
+  "dread":         { "onion": "" },
+  "xss":           { "onion": "", "clearnet": "https://xss.is" },
+  "exploit":       { "onion": "", "clearnet": "https://exploit.in" },
+  "breachforums":  { "onion": "" },
+  "bhf":           { "onion": "", "clearnet": "" },
+  "damagelib":     { "onion": "" },
+  "cracked":       { "onion": "", "clearnet": "https://cracked.io" },
+  "nulled":        { "onion": "", "clearnet": "https://www.nulled.to" },
+  "russianmarket": { "onion": "" },
+  "briansclub":    { "onion": "" },
+  "styx":          { "onion": "" },
+  "abacus":        { "onion": "" }
+}

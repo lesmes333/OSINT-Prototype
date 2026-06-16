@@ -570,6 +570,22 @@ def search_breachforums(domain: str) -> List[Dict]:
     return hits
 
 
+def _search_forum_registry(domain: str) -> Dict:
+    """
+    Busca en el registro data-driven de foros (darkweb_forums.py): DarkForums,
+    Dread, XSS, Exploit, BHF, DamageLib, mercados de credenciales, etc.
+
+    Las direcciones .onion se toman de darkweb_onions.json (gitignored). Devuelve
+    {hits, buscados, sin_endpoint}. Si el módulo falla, no rompe el escaneo.
+    """
+    try:
+        from .darkweb_forums import search_all_forums
+        return search_all_forums(domain)
+    except Exception as e:  # noqa: BLE001
+        log.debug("forum_registry: %s", e)
+        return {"hits": [], "buscados": 0, "sin_endpoint": []}
+
+
 def search_clearnet_forums(domain: str) -> List[Dict]:
     """
     Busca en foros clearnet de credenciales/hacking: XSS.is, Nulled.to,
@@ -832,6 +848,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
         "ransomlook": lambda: check_ransomlook_victims(domain),
         "breachforums": lambda: search_breachforums(domain),
         "clearnet_forums": lambda: search_clearnet_forums(domain),
+        "forum_registry": lambda: _search_forum_registry(domain),
         "hudson_rock": lambda: check_hudson_rock(domain),
         "pulsedive": lambda: check_pulsedive(domain),
         "paste_sites": lambda: search_paste_sites(domain, use_tor=use_tor),
@@ -867,11 +884,16 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
     if summary["tor_search_hits"]:
         summary["fuentes_activas"].append(f"tor_search ({len(summary['tor_search_hits'])} resultados)")
 
-    # Foros
+    # Foros (BreachForums + foros clearnet legacy + registro data-driven)
     bf_hits = par.get("breachforums") or []
     cl_hits = par.get("clearnet_forums") or []
+    fr = par.get("forum_registry") or {}
+    fr_hits = fr.get("hits", []) if isinstance(fr, dict) else []
     summary["forum_hits"] = (bf_hits if isinstance(bf_hits, list) else []) + \
-                            (cl_hits if isinstance(cl_hits, list) else [])
+                            (cl_hits if isinstance(cl_hits, list) else []) + \
+                            fr_hits
+    # Foros del registro que necesitan una .onion en darkweb_onions.json para activarse.
+    summary["forums_sin_endpoint"] = fr.get("sin_endpoint", []) if isinstance(fr, dict) else []
     if summary["forum_hits"]:
         summary["fuentes_activas"].append(f"foros ({len(summary['forum_hits'])} hits)")
 

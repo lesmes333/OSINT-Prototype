@@ -11,6 +11,11 @@ __pycache__/
 # API keys (importante: no subir tus claves reales)
 .env
 
+# Direcciones .onion verificadas del operador (volátiles, no se comparten)
+# El formato de ejemplo está en darkweb_onions.example.json (ese SÍ se versiona).
+darkweb_onions.json
+darkweb_onions.local.json
+
 # Resultados generados (los informes se guardan en outputs/)
 outputs/
 informe_*.html
