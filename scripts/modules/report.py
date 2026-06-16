@@ -1159,10 +1159,62 @@ class ReportGenerator:
                     f"<tbody>{arows}</tbody></table>"
                 )
 
+            # ── IOCs detectados (extraídos de toda la dark web) ───────────────
+            ioc_section = ""
+            ioc_data = dw.get('iocs', {}) if isinstance(dw, dict) else {}
+            iocs = ioc_data.get('iocs', {}) if isinstance(ioc_data, dict) else {}
+            ioc_total = ioc_data.get('total', 0) if isinstance(ioc_data, dict) else 0
+            if ioc_total:
+                IOC_LABELS = {
+                    'emails_dominio': 'Emails del dominio', 'emails': 'Emails',
+                    'credenciales': 'Credenciales (user:pass)',
+                    'subdominios_objetivo': 'Subdominios del objetivo', 'dominios': 'Dominios',
+                    'ips': 'IPv4', 'ipv6': 'IPv6',
+                    'md5': 'MD5', 'sha1': 'SHA1', 'sha256': 'SHA256', 'sha512': 'SHA512',
+                    'btc': 'BTC', 'eth': 'ETH', 'xmr': 'XMR',
+                    'cve': 'CVE', 'onion': 'Servicios .onion',
+                }
+                counts = ioc_data.get('counts', {})
+                chips = "".join(
+                    f"<span class='badge unk'>{escape(IOC_LABELS.get(t, t))}: {n}</span> "
+                    for t, n in counts.items() if n
+                )
+
+                def ioc_table(title, types):
+                    rows = []
+                    for t in types:
+                        for v in iocs.get(t, [])[:50]:
+                            rows.append(
+                                f"<tr><td class='muted'>{escape(IOC_LABELS.get(t, t))}</td>"
+                                f"<td>{escape(str(v))}</td></tr>"
+                            )
+                    if not rows:
+                        return ""
+                    return (f"<h4>{title}</h4>"
+                            f"<table><thead><tr><th>Tipo</th><th>Valor</th></tr></thead>"
+                            f"<tbody>{''.join(rows)}</tbody></table>")
+
+                tablas = (
+                    ioc_table("🔑 Credenciales y emails", ['credenciales', 'emails_dominio', 'emails'])
+                    + ioc_table("🌐 Dominios e IPs", ['subdominios_objetivo', 'dominios', 'ips', 'ipv6'])
+                    + ioc_table("#️⃣ Hashes", ['md5', 'sha1', 'sha256', 'sha512'])
+                    + ioc_table("💰 Wallets de criptomoneda", ['btc', 'eth', 'xmr'])
+                    + ioc_table("🧅 Otros", ['onion', 'cve'])
+                )
+                ioc_section = (
+                    f"<h3>🔎 IOCs detectados ({ioc_total})</h3>"
+                    f"<p>{chips}</p>"
+                    f"<p class='muted'>Exportados también a "
+                    f"<code>iocs_&lt;dominio&gt;_&lt;fecha&gt;.json</code> / "
+                    f"<code>.csv</code>. Se muestran hasta 50 por tipo.</p>"
+                    f"{tablas}"
+                )
+
             dw_section = (
                 f"<section><h2>🛡️ Exposición &amp; Dark Web</h2>"
                 f"{overview}"
                 f"{c1_section}{c2_section}{c3_section}{c4_section}{c6_section}{c5_section}"
+                f"{ioc_section}"
                 f"</section>"
             )
 
