@@ -19,11 +19,18 @@ indexado. No se interactúa con sistemas objetivo ni formularios de login.
 import re
 import time
 from typing import Dict, List, Tuple
+from urllib.parse import quote_plus
 
 import requests
 from bs4 import BeautifulSoup
 
 from .utils import get_logger, run_parallel, run_named_parallel
+from .tor_utils import (
+    tor_session as _tu_tor_session,
+    clearnet_session as _tu_clearnet_session,
+    request_with_retry,
+    pick_user_agent,
+)
 
 log = get_logger()
 
@@ -33,6 +40,14 @@ TOR_PROXIES = {
     "https": "socks5h://127.0.0.1:9050",
 }
 TOR_UA = "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+# ── Keywords de fuga para búsquedas agresivas ─────────────────────────────────
+# Se combinan con el dominio objetivo para encontrar hilos/dumps que de otro modo
+# no aparecen al buscar el dominio "a secas" (así se indexan realmente las fugas).
+LEAK_KEYWORDS = [
+    "dump", "leak", "breach", "database", "combolist", "combo",
+    "leaked", "stealer", "credentials", "accounts", "fullz",
+]
 
 # ── APIs clearnet de threat intelligence (gratuitas sin clave) ────────────────
 HUDSON_ROCK     = "https://cavalier.hudsonrock.com/api/json/v2"
@@ -106,6 +121,13 @@ TELEGRAM_LEAK_CHANNELS = [
     "exposeddatabases", # Exposed DB dumps
     "hacknews_en",      # Hack news
     "cybersecurity365", # Cybersecurity alerts
+    "DataLeakMonitoring",  # Monitorización de fugas
+    "leak_databases",      # Bases de datos filtradas
+    "combolist",           # Combolists
+    "cloudleak",           # Cloud leaks
+    "breached_db",         # DBs de brechas
+    "darkfeed_news",       # DarkFeed (ransomware/leaks)
+    "ransomwatch",         # Ransomware watch
 ]
 
 # ── Paste sites clearnet con contenido de brechas ─────────────────────────────
@@ -137,11 +159,11 @@ CLEARNET_FORUMS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _tor_session(timeout: int = 25) -> requests.Session:
-    s = requests.Session()
-    s.proxies.update(TOR_PROXIES)
-    s.headers["User-Agent"] = TOR_UA
-    s.headers["Accept-Language"] = "en-US,en;q=0.5"
-    return s
+    """
+    Sesión Tor con circuito aislado y User-Agent rotativo (delega en tor_utils).
+    Se conserva el nombre por compatibilidad con el resto del módulo.
+    """
+    return _tu_tor_session(timeout=timeout, isolate=True, tor_only_ua=True)
 
 
 def _domain_variants(domain: str) -> List[str]:
@@ -149,11 +171,120 @@ def _domain_variants(domain: str) -> List[str]:
     base = domain.split(".")[0]
     tld  = ".".join(domain.split(".")[1:])
     return list(dict.fromkeys([
-        domain,           # zunder.com
-        f"@{domain}",     # @zunder.com  (dumps de credenciales)
-        base,             # zunder       (menciones sin TLD)
-        f"@{base}",       # @zunder      (user handles)
+        domain,           # example.com
+        f"@{domain}",     # @example.com  (dumps de credenciales)
+        base,             # example       (menciones sin TLD)
+        f"@{base}",       # @example      (user handles)
     ]))
+
+
+# ── Vocabulario de fuga multilingüe (EN / ES / RU) ────────────────────────────
+# En la dark web los dumps se anuncian en varios idiomas. El ruso es habitual en
+# foros de carding/credenciales (XSS, Exploit, etc.); el español aparece en
+# canales de Telegram y foros hispanos. Incluir los tres multiplica la cobertura.
+BREACH_VOCAB_EN = [
+    "leak", "leaked", "dump", "database", "db", "combo", "combolist",
+    "breach", "breached", "accounts", "credentials", "passwords",
+    "fullz", "stealer", "logs", "cracked", "sql",
+]
+BREACH_VOCAB_ES = [
+    "filtracion", "filtración", "fuga", "fugas", "contraseñas",
+    "credenciales", "base de datos", "robados", "vendo", "hackeado",
+]
+# Ruso (cirílico + transliteración latina que también se usa en foros).
+BREACH_VOCAB_RU = [
+    "слив",        # sliv      → filtración/leak
+    "база",        # baza      → base de datos
+    "дамп",        # damp      → dump
+    "утечка",      # utechka   → fuga
+    "пароли",      # paroli    → contraseñas
+    "взлом",       # vzlom     → hackeo
+    "логи",        # logi      → logs (stealer)
+    "продам",      # prodam    → "vendo"
+    "sliv", "baza", "dump", "logi",  # transliteraciones frecuentes
+]
+
+
+def generate_breach_queries(domain: str, max_queries: int = 30) -> List[str]:
+    """
+    Genera un conjunto amplio de consultas para buscar fugas del dominio en la
+    dark web, combinando variaciones del nombre con vocabulario de brecha en
+    inglés, español y ruso.
+
+    Estrategia (de mayor a menor precisión, así el recorte por `max_queries`
+    conserva siempre lo más relevante):
+
+      1. Variantes "ancla" del nombre:  example.com, www.example.com, @example.com,
+         example, y patrones de archivo de dump (example.txt, example.sql, example.zip).
+      2. dominio.com + keyword EN:       "example.com" leak / dump / database ...
+      3. nombre base + keyword EN:       example leak / dump / combo ...
+      4. nombre base + keyword ES:       example filtracion / contraseñas ...
+      5. nombre base + keyword RU:       example слив / база / dump ...
+      6. Variantes con año:              example 2024 / 2025 / 2026
+      7. Variante con guion (si aplica):  zun-der  (typosquat / separadores)
+
+    :param domain: dominio objetivo (p.ej. 'example.com').
+    :param max_queries: tope de consultas devueltas (evita escaneos eternos).
+    :return: lista de strings de búsqueda, deduplicada y ordenada por precisión.
+    """
+    domain = domain.lower().strip()
+    base = domain.split(".")[0]                      # 'example'
+    tld  = ".".join(domain.split(".")[1:]) or "com"  # 'com'
+
+    queries: List[str] = []
+
+    # 1) Anclas del nombre + patrones típicos de fichero de dump.
+    queries += [
+        domain,
+        f"www.{domain}",
+        f"@{domain}",
+        base,
+        f"{base}.txt", f"{base}.sql", f"{base}.zip", f"{base}.csv",
+        f"{domain}.txt", f"{domain}.sql",
+    ]
+
+    # 2) dominio completo + vocabulario inglés (entre comillas = frase exacta).
+    for kw in BREACH_VOCAB_EN:
+        queries.append(f'"{domain}" {kw}')
+
+    # 3) nombre base + vocabulario inglés.
+    for kw in BREACH_VOCAB_EN:
+        queries.append(f"{base} {kw}")
+
+    # 4) nombre base + vocabulario español.
+    for kw in BREACH_VOCAB_ES:
+        queries.append(f"{base} {kw}")
+
+    # 5) nombre base + vocabulario ruso (cirílico y transliterado).
+    for kw in BREACH_VOCAB_RU:
+        queries.append(f"{base} {kw}")
+
+    # 6) Variantes con año (los dumps suelen etiquetarse por año).
+    for year in ("2024", "2025", "2026"):
+        queries.append(f"{base} {year}")
+        queries.append(f'"{domain}" {year}')
+
+    # 7) Variante con guion como separador (algunos índices lo trocean así).
+    if len(base) > 4 and "-" not in base:
+        mid = len(base) // 2
+        queries.append(f"{base[:mid]}-{base[mid:]}")
+
+    # Deduplicar preservando el orden (precisión) y recortar al tope.
+    return list(dict.fromkeys(queries))[:max_queries]
+
+
+def _aggressive_queries(domain: str, max_queries: int = 8) -> List[str]:
+    """
+    Subconjunto de ALTA SEÑAL para los motores .onion (que no deben recibir las
+    ~30 consultas completas). Prioriza el dominio y el dominio+keyword inglesa,
+    que es lo que mejor indexan Ahmia/Torch/Haystak, en vez de las anclas de
+    nombre de fichero (.txt/.zip) que son ruido para un buscador.
+    """
+    base = domain.split(".")[0]
+    queries = [domain, f"@{domain}", base]
+    for kw in ("leak", "dump", "database", "combolist", "breach"):
+        queries.append(f'"{domain}" {kw}')
+    return list(dict.fromkeys(queries))[:max_queries]
 
 
 def _extract_hits(html: str, variants: List[str], fuente: str,
@@ -311,44 +442,61 @@ TOR_SEARCH_ENGINES = [
 
 
 def _search_one_tor_engine(args: tuple) -> List[Dict]:
-    """Busca el dominio en un motor .onion via Tor. Ejecutable en paralelo."""
+    """
+    Busca el dominio en un motor .onion via Tor con queries agresivas y
+    reintentos resilientes (circuito nuevo entre fallos). Ejecutable en paralelo.
+
+    Cada query combina el dominio con keywords de fuga (dump/leak/breach…) para
+    sacar a la luz dumps y combolists que no aparecen buscando el dominio solo.
+    La detección de coincidencias se hace sobre las variantes del dominio, no
+    sobre la query completa (que incluye la keyword).
+    """
     name, url_template, domain = args
     hits = []
     variants = _domain_variants(domain)
-    ts = _tor_session(timeout=15)   # 15s — suficiente; falla rápido si el motor está caído
+    queries  = _aggressive_queries(domain, max_queries=5)
+    ts = _tor_session(timeout=15)   # circuito aislado + UA rotativa
 
-    for variant in variants[:2]:
-        url = url_template.format(q=variant)
-        try:
-            r = ts.get(url, timeout=15)
-            if r.status_code != 200:
+    for query in queries:
+        url = url_template.format(q=quote_plus(query))
+        r = request_with_retry(ts, url, timeout=15, retries=2,
+                               accept_status=(200,))
+        if r is None:
+            continue
+        soup = BeautifulSoup(r.text, "html.parser")
+        text_lower = r.text.lower()
+
+        for variant in variants[:2]:
+            vl = variant.lower()
+            if vl not in text_lower:
                 continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            result_links = soup.find_all("a", href=True)
-            mentions = [a for a in result_links
-                        if variant.lower() in (a.get_text() + a.get("href", "")).lower()
+            # 1) Enlaces .onion en resultados que mencionan la variante.
+            mentions = [a for a in soup.find_all("a", href=True)
+                        if vl in (a.get_text() + a.get("href", "")).lower()
                         and ".onion" in a.get("href", "")
-                        and f"?q={variant.lower()}" not in a.get("href", "").lower()
-                        and f"search={variant.lower()}" not in a.get("href", "").lower()
-                        and f"query={variant.lower()}" not in a.get("href", "").lower()]
+                        and f"?q={vl}" not in a.get("href", "").lower()
+                        and f"search={vl}" not in a.get("href", "").lower()
+                        and f"query={vl}" not in a.get("href", "").lower()]
             if mentions:
                 for a in mentions[:3]:
                     hits.append({
                         "motor":    name,
                         "variante": variant,
+                        "query":    query,
                         "enlace":   a.get("href", "")[:150],
                         "texto":    re.sub(r"\s+", " ", a.get_text().strip())[:100],
                         "fuente":   f"tor_search:{name}",
                     })
-            elif variant.lower() in r.text.lower():
-                idx = r.text.lower().find(variant.lower())
+            else:
+                # 2) Coincidencia en texto, filtrando ecos de la propia búsqueda.
+                idx = text_lower.find(vl)
                 ctx = r.text[max(0, idx-100):idx+200]
                 ctx_clean = re.sub(r"<[^>]+>", " ", ctx)
                 ctx_clean = re.sub(r"\s+", " ", ctx_clean).strip()[:150]
                 window = r.text[max(0, idx-80):idx+120].lower()
                 engine_slug = name.lower().replace(" ", "")
                 is_cross_search = any(pat in window for pat in [
-                    f"?q={variant.lower()}", f"query={variant.lower()}",
+                    f"?q={vl}", f"query={vl}",
                     "search?q=", "search for", "buscar en",
                     "i2p", "freenet", engine_slug, "<title>", "meta name",
                 ])
@@ -356,15 +504,14 @@ def _search_one_tor_engine(args: tuple) -> List[Dict]:
                     hits.append({
                         "motor":    name,
                         "variante": variant,
+                        "query":    query,
                         "enlace":   url,
                         "texto":    ctx_clean,
                         "fuente":   f"tor_search:{name}",
                     })
-            if hits:
-                log.info("   [+] Tor search %s: encontró '%s'", name, variant)
-                break
-        except Exception as e:  # noqa: BLE001
-            log.debug("Tor search %s: %s", name, str(e)[:60])
+        if hits:
+            log.info("   [+] Tor search %s: hits con query '%s'", name, query)
+            break  # con un hit confirmado basta; no machacar el motor
     return hits
 
 
@@ -394,24 +541,16 @@ def _search_forum_generic(name: str, url: str, domain: str,
     """
     variants = _domain_variants(domain)
     for variant in variants[:2]:
-        search_url = url.format(q=variant)
-        try:
-            if use_tor:
-                sess = _tor_session(timeout=25)
-            else:
-                sess = requests.Session()
-                sess.headers.update({
-                    "User-Agent": TOR_UA,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                })
-            r = sess.get(search_url, timeout=20, allow_redirects=True)
-            if r.status_code not in (200,):
-                continue
-            hits = _extract_hits(r.text, [variant], name, search_url, use_tor)
-            if hits:
-                return hits
-        except Exception as e:  # noqa: BLE001
-            log.debug("%s: %s", name, str(e)[:60])
+        search_url = url.format(q=quote_plus(variant))
+        sess = _tor_session(timeout=25) if use_tor else _tu_clearnet_session()
+        r = request_with_retry(sess, search_url, timeout=20, retries=2,
+                               rotate_circuit_on_fail=use_tor,
+                               accept_status=(200,))
+        if r is None:
+            continue
+        hits = _extract_hits(r.text, [variant], name, search_url, use_tor)
+        if hits:
+            return hits
     return []
 
 
@@ -574,19 +713,14 @@ def search_paste_sites(domain: str, use_tor: bool = False) -> List[Dict]:
         if is_onion and not use_tor:
             return []
         for variant in variants[:2]:
-            url = url_template.format(q=variant)
-            try:
-                if is_onion:
-                    sess = _tor_session(timeout=20)
-                else:
-                    sess = requests.Session()
-                    sess.headers["User-Agent"] = TOR_UA
-                r = sess.get(url, timeout=15, allow_redirects=True)
-                if r.status_code == 200 and variant.lower() in r.text.lower():
-                    return [{"fuente": name, "variante": variant,
-                             "url": url, "via_tor": is_onion}]
-            except Exception:  # noqa: BLE001
-                pass
+            url = url_template.format(q=quote_plus(variant))
+            sess = _tor_session(timeout=20) if is_onion else _tu_clearnet_session()
+            r = request_with_retry(sess, url, timeout=15, retries=1,
+                                   rotate_circuit_on_fail=is_onion,
+                                   accept_status=(200,))
+            if r is not None and variant.lower() in r.text.lower():
+                return [{"fuente": name, "variante": variant,
+                         "url": url, "via_tor": is_onion}]
         return []
 
     sources = PASTE_SITES_CLEARNET + (PASTE_SITES_ONION if use_tor else [])
@@ -612,16 +746,17 @@ def search_telegram_leak_channels(domain: str) -> List[Dict]:
 
     def _check_channel(channel):
         channel_hits = []
-        url = f"https://t.me/s/{channel}"
-        try:
-            sess = requests.Session()
-            sess.headers.update({
-                "User-Agent": TOR_UA,
-                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-            })
-            r = sess.get(url, timeout=15, allow_redirects=True)
-            if r.status_code != 200:
-                return []
+        sess = _tu_clearnet_session()
+        # Buscar en el histórico del canal con el buscador nativo (?q=), no solo
+        # leer los mensajes recientes. Se prueba el dominio y dominio+keyword.
+        search_terms = [domain, f"{domain} leak", f"{domain} dump"]
+        for term in search_terms:
+            url = f"https://t.me/s/{channel}?q={quote_plus(term)}"
+            r = request_with_retry(sess, url, timeout=15, retries=1,
+                                   rotate_circuit_on_fail=False,
+                                   accept_status=(200,))
+            if r is None:
+                continue
             text = r.text.lower()
             for variant in variants[:2]:
                 if variant.lower() in text:
@@ -632,13 +767,12 @@ def search_telegram_leak_channels(domain: str) -> List[Dict]:
                     channel_hits.append({
                         "fuente":   f"telegram/{channel}",
                         "variante": variant,
+                        "query":    term,
                         "url":      url,
                         "extracto": ctx_clean,
                         "via_tor":  False,
                     })
-                    break
-        except Exception as e:  # noqa: BLE001
-            log.debug("Telegram %s: %s", channel, str(e)[:60])
+                    return channel_hits  # un hit por canal basta
         return channel_hits
 
     for _, result in run_parallel(_check_channel, TELEGRAM_LEAK_CHANNELS,

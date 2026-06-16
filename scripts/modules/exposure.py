@@ -155,7 +155,7 @@ class ExposureMonitor:
 
     def _dehashed_domain(self) -> List[Dict]:
         """Dehashed: la mayor BD de credenciales filtradas (~15 mil millones de registros).
-        Busca por dominio (@zunder.com), devuelve email, usuario, contraseña, IP, nombre.
+        Busca por dominio (@example.com), devuelve email, usuario, contraseña, IP, nombre.
         Requiere cuenta Dehashed ($5.49/mes o $14.99/año — registro en dehashed.com)."""
         if not self.dehashed_key or not self.dehashed_email:
             return []
@@ -636,7 +636,7 @@ class ExposureMonitor:
         """ransomware.live: busca el dominio en víctimas e incidentes recientes.
         API pública y gratuita, sin clave. Cubre las 100 entradas más recientes."""
         resultado = {"victims": [], "cyberattacks": [], "error": None}
-        domain_base = self.domain.split(".")[0]  # "zunder" de "zunder.com"
+        domain_base = self.domain.split(".")[0]  # "example" de "example.com"
         try:
             # /recentvictims: 100 últimas víctimas en leak sites de ransomware
             r = self.session.get(f"{RANSOMWARE_LIVE}/recentvictims", timeout=15)
@@ -893,7 +893,7 @@ class ExposureMonitor:
         nivel = max(nivel, ds_nivel,  key=niveles_orden.index)
         summary["nivel_exposicion"] = nivel
 
-        return {
+        result = {
             "status":       "success",
             "keyword":      self.domain,
             "breaches":     breaches,
@@ -909,3 +909,15 @@ class ExposureMonitor:
             "analyzed_threats":  analyzed_threats,
             "timestamp":         time.strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+        # ── IOCs: extraer indicadores accionables de todo el corpus recolectado ──
+        try:
+            from .ioc_extractor import extract_iocs_from_results
+            ioc_result = extract_iocs_from_results(result, target_domain=self.domain)
+            result["iocs"] = ioc_result
+            summary["iocs_total"] = ioc_result.get("total", 0)
+        except Exception as e:  # noqa: BLE001
+            log.debug("IOC extractor: %s", e)
+            result["iocs"] = {"iocs": {}, "counts": {}, "total": 0}
+
+        return result

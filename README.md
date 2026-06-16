@@ -47,11 +47,11 @@ Detecta exposición del dominio en fuentes públicas, deep web y dark web **lega
 | **3. Leaks en fuentes abiertas** | Historial público + repos + Pastebin | URLScan · GitHub · **Pastebin/archive vía Tor** (gratis) · Pastebin Pro · IntelX | `URLSCAN_API_KEY`, `GITHUB_TOKEN`, `PASTEBIN_API_KEY`* |
 | **4. Ransomware & Ciberataques** | Si el dominio aparece en leak sites de grupos de ransomware activos + reputación de dominio | **ransomware.live · RansomLook · Maltiverse** (todos gratis, sin clave) | — |
 | **5. Crawling .onion** | Análisis profundo de páginas `.onion` con contenido amenazante | Tor + Ahmia .onion + Haystak + Torch + 15 motores adicionales | `--tor` + Tor en `:9050` |
-| **6. Foros / Leak sites / Infostealers** | Búsqueda activa en fuentes dark web conocidas: foros de credenciales, acceso directo a 80+ leak sites de ransomware, inteligencia de infostealers, Telegram público | **80+ leak sites .onion** directos · **BreachForums** (.onion+clearnet) · **XSS.is, Nulled.to, Cracked.io, exploit.in** · **Ahmia+OnionLand+Haystak+Torch+DarkSearch** (motores .onion) · **Hudson Rock** (infostealers gratis) · **Pulsedive** (domain intel) · **7 canales Telegram** públicos · DeepPaste + Ghostbin + paste.ee + Justpaste.it | `--tor` (recomendado para máxima cobertura) |
+| **6. Foros / Leak sites / Infostealers** | Búsqueda activa en fuentes dark web conocidas: foros de credenciales, acceso directo a 80+ leak sites de ransomware, inteligencia de infostealers, Telegram público | **80+ leak sites .onion** directos · **BreachForums** (.onion+clearnet) · **XSS.is, Nulled.to, Cracked.io, exploit.in** · **Ahmia+OnionLand+Haystak+Torch+DarkSearch** (motores .onion) · **Hudson Rock** (infostealers gratis) · **Pulsedive** (domain intel) · **14 canales Telegram** públicos · DeepPaste + Ghostbin + paste.ee + Justpaste.it | `--tor` (recomendado para máxima cobertura) |
 
-> \* **Pastebin Pro** (`PASTEBIN_API_KEY`): el CISO considera Pastebin una fuente clave. Requiere cuenta Pro en [pastebin.com/pro](https://pastebin.com/pro) ($8.95/mes). Sin ella, la Capa 3 usa el **archivo público de Pastebin vía Tor** como alternativa gratuita.
+> \* **Pastebin Pro** (`PASTEBIN_API_KEY`): opcional, para monitorizar el feed de Pastebin en tiempo real. Requiere cuenta Pro en [pastebin.com/pro](https://pastebin.com/pro) ($8.95/mes). Sin ella, la Capa 3 usa el **archivo público de Pastebin vía Tor** como alternativa gratuita.
 
-> 💡 **Capa 6 (Dark web real) sin coste:** la herramienta accede directamente a **80+ leak sites `.onion`** de grupos de ransomware activos, busca en BreachForums, XSS.is, foros rusos de credenciales, consulta **Hudson Rock** (infostealer intelligence) y busca en **7 canales Telegram públicos** de filtraciones — todo gratis, sin claves de pago. Esto cubre lo que herramientas comerciales de *dark web monitoring* (DarkOwl, Flare.io, Recorded Future) cobran a $500–$5.000/mes.
+> 💡 **Capa 6 (Dark web real) sin coste:** la herramienta accede directamente a **80+ leak sites `.onion`** de grupos de ransomware activos, busca en BreachForums, XSS.is, foros rusos de credenciales, consulta **Hudson Rock** (infostealer intelligence) y busca en **14 canales Telegram públicos** de filtraciones — todo gratis, sin claves de pago. Esto cubre lo que herramientas comerciales de *dark web monitoring* (DarkOwl, Flare.io, Recorded Future) cobran a $500–$5.000/mes.
 
 > ⚠️ **Sobre Ahmia en clearnet:** Ahmia.fi clearnet redirige a su homepage sin devolver resultados (requiere Tor Browser). La herramienta accede directamente al `.onion` de Ahmia vía Tor, evitando el problema. Usa `--tor` para activar las búsquedas en motores .onion.
 
@@ -60,6 +60,39 @@ Detecta exposición del dominio en fuentes públicas, deep web y dark web **lega
 **Sin ninguna clave de pago**, la Fase 4 funciona con: XposedOrNot + XposedOrNot domain-level + URLScan + GitHub + Pastebin/Tor + **todos los motores .onion** (con Tor) + ransomware.live + RansomLook + Maltiverse + **Capa 6 completa** (80 leak sites + foros + infostealers + Telegram).
 
 > ✅ Solo se consultan índices y APIs públicas. No se accede a sistemas ajenos ni se descarga contenido ilegal. Acorde con un marco defensivo y autorizado.
+
+### 🔎 Extracción y exportación de IOCs
+
+Todo el texto recolectado en la dark web (foros, leak sites, paste sites, canales Telegram, motores `.onion`) pasa por un **extractor de IOCs** (`ioc_extractor.py`) que detecta y deduplica indicadores accionables:
+
+| Tipo | Detecta |
+|------|---------|
+| **Emails** | Correos sueltos y, resaltados, los del dominio objetivo |
+| **Credenciales** | Pares `email:contraseña` y `usuario:contraseña` (formato combolist) |
+| **Dominios / subdominios** | Dominios mencionados y subdominios del objetivo |
+| **IPs** | IPv4 e IPv6 **públicas** (descarta privadas/reservadas) |
+| **Hashes** | MD5 · SHA1 · SHA256 · SHA512 |
+| **Wallets** | Bitcoin (BTC) · Ethereum (ETH) · Monero (XMR) |
+| **Otros** | CVEs · servicios `.onion` |
+
+Los IOCs se incluyen en el informe JSON y, además, se exportan a archivos propios listos para ingerir en un **SIEM/TIP**:
+
+- `iocs_<dominio>_<fecha>.json` — estructurado, con conteo por tipo.
+- `iocs_<dominio>_<fecha>.csv` — una fila por IOC (`tipo,valor`).
+
+> Los regex están validados (p. ej. las IPv6 se confirman con `ipaddress`, no por regex puro) y filtran falsos positivos comunes (fragmentos de email, nombres de fichero `.txt`/`.sql`, etc.).
+
+### 🌐 Búsqueda agresiva y multilingüe
+
+La búsqueda de fugas combina el dominio con vocabulario real de brecha en **inglés, español y ruso** (`generate_breach_queries()`): `leak`, `dump`, `database`, `combolist`, `filtracion`, `contraseñas`, `слив`, `база`, `дамп`… además de variantes con año, `www`, `@dominio` y patrones de fichero de dump. Esto saca a la luz dumps que no aparecen buscando solo el dominio.
+
+### 🥷 OPSEC y resiliencia (Tor)
+
+El acceso a `.onion` es sigiloso y tolerante a fallos (`tor_utils.py`):
+
+- **Rotación de User-Agents** (Tor Browser para `.onion`).
+- **Aislamiento de circuito** por sesión (stream isolation vía SOCKS auth): reparte la carga y aísla servicios `.onion` caídos.
+- **Reintentos con backoff + jitter** y rotación de circuito ante timeouts (los hidden services fallan a menudo; un solo intento pierde hits reales).
 
 ### 🇪🇸 Integración con INCIBE-CERT
 Cada CVE detectado se **enlaza con su ficha en español** de la *Alerta Temprana* de INCIBE-CERT (verificando que existe). Las que están en alerta temprana reciente se marcan con ⚠️, y además se cruzan las tecnologías detectadas con el feed reciente.
@@ -299,6 +332,8 @@ Por cada dominio, en `outputs/` (o la carpeta indicada con `-o`):
 | `informe_<dominio>_<fecha>.md` | Mismo contenido en Markdown (para GitHub/lectura rápida). |
 | `activos_<dominio>_<fecha>.json` | Datos completos y estructurados (para automatización). |
 | `subdominios_<dominio>_<fecha>.csv` | Lista de subdominios con su(s) fuente(s). |
+| `iocs_<dominio>_<fecha>.json` | **IOCs** extraídos de la dark web (emails, credenciales, IPs, hashes, wallets, onions) con conteo por tipo. Solo si se detecta alguno. |
+| `iocs_<dominio>_<fecha>.csv` | Mismos IOCs, una fila por indicador (`tipo,valor`) — listo para SIEM/TIP. |
 
 ---
 
@@ -327,7 +362,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 
 | Servicio | Variable | Coste | Qué aporta |
 |----------|----------|-------|------------|
-| **Pastebin Pro** | `PASTEBIN_API_KEY` | $8.95/mes | Monitorización del feed de Pastebin en tiempo real. **Recomendado por el CISO.** Obtener en: https://pastebin.com/pro |
+| **Pastebin Pro** | `PASTEBIN_API_KEY` | $8.95/mes | Monitorización del feed de Pastebin en tiempo real. Obtener en: https://pastebin.com/pro |
 | **Intelligence X** | `INTELX_API_KEY` | desde ~1800 USD/año | Búsqueda en dark web, paste sites históricos, buckets S3 expuestos, foros de hacking. El plan gratuito Open Source **no incluye** acceso API. Obtener en: https://intelx.io/product |
 | **Have I Been Pwned** | `HIBP_API_KEY` | desde ~3.50 USD/mes | Brechas de datos por email (enriquece XposedOrNot, que es gratis). Obtener en: https://haveibeenpwned.com/API/Key |
 | **Dehashed** | `DEHASHED_EMAIL` + `DEHASHED_API_KEY` | $5.49/mes | La BD de credenciales filtradas más grande (~15B registros). Búsqueda por dominio devuelve emails, usuarios, contraseñas, IPs y nombres reales. Obtener en: https://dehashed.com/profile |
@@ -380,8 +415,11 @@ OSINT-Prototype/
     ├── incibe.py                # Integración con INCIBE-CERT (alerta temprana)
     ├── diffing.py               # Modo monitorización: compara con el escaneo anterior
     ├── diagnostics.py           # Estado de API keys y herramientas
-    ├── exposure.py              # Fase 4: brechas · dark web (5 capas) · ransomware · LeakCheck
+    ├── exposure.py              # Fase 4: brechas · dark web (6 capas) · ransomware · LeakCheck · IOCs
     ├── darkweb_monitor.py       # Crawling .onion via Tor (Ahmia/Haystak/Torch + multi-motor)
+    ├── darkweb_sources.py       # Capa 6: leak sites de ransomware · foros · infostealers · Telegram
+    ├── tor_utils.py             # OPSEC/resiliencia Tor: rotación UA · aislamiento de circuito · reintentos
+    ├── ioc_extractor.py         # Extracción y export de IOCs (emails, credenciales, IPs, hashes, wallets…)
     └── report.py                # Informes JSON / CSV / Markdown / HTML
 ```
 

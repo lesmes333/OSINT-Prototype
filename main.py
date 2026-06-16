@@ -218,6 +218,13 @@ def analyze_domain(domain, args, do_fp, do_dw):
                     domain, emails=emails, run_tor=args.tor, threads=args.threads
                 ).run_all()
             ui.table_exposure(threat_results["darkweb"])
+
+            # Exportar IOCs detectados (emails, credenciales, IPs, hashes, cripto…)
+            ioc_result = threat_results["darkweb"].get("iocs", {})
+            if ioc_result.get("total"):
+                from scripts.modules.ioc_extractor import export_iocs
+                paths = export_iocs(ioc_result, args.output_dir, domain)
+                threat_results["darkweb"]["ioc_files"] = paths
         except Exception as e:  # noqa: BLE001
             threat_results["darkweb"] = {"status": "error", "message": str(e)}
             ui.error(f"Monitorización de exposición: {e}")
