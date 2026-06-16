@@ -161,48 +161,44 @@ def analyze_domain(domain, args, do_fp, do_dw):
     )
     ui.table_dns(discovery_results.get("dns_records", {}))
 
-    # --- FASE 2.5: fingerprinting + CVEs ---
-    if do_fp:
-        ui.phase("FASE 2.5", "FINGERPRINTING + CVEs + EXPLOITS + INCIBE-CERT",
-                 "Tecnologías (Docker/Wappalyzer) → CVEs (NVD) → Exploit-DB → referencias INCIBE-CERT")
+    # --- FASES 2.5 y 4: independientes entre sí → se solapan EN PARALELO ---
+    # Fingerprinting (Docker+APIs) y exposición/dark web (red/Tor) no comparten
+    # datos de entrada (ambas ya tienen lo que necesitan de FASE 1+2), así que
+    # lanzarlas a la vez recorta el tiempo total sin alterar los resultados.
+    # No se hace UI dentro de los hilos: cada función DEVUELVE su dict y las
+    # tablas se pintan después, en orden, para no entremezclar la salida.
+
+    def _fase_fingerprint() -> dict:
+        """FASE 2.5: tecnologías → CVEs → exploits → INCIBE. Devuelve dict parcial."""
         from scripts.modules.fingerprint import Fingerprinter
         from scripts.modules.cve_exploit import CveExploitScanner
 
+        out: dict = {}
         urls = [f"https://{s}" for s in discovery_results["subdomains"] if not s.startswith("*.")]
         urls = urls[: args.max_fp_urls]
         try:
             fp = Fingerprinter(threads=max(2, args.threads // 8))
             if not fp.is_ready():
-                threat_results["fingerprinting"] = {
+                out["fingerprinting"] = {
                     "status": "error",
                     "message": "Docker/wappalyzer-next no disponible.",
                     "results": [], "total_technologies": 0,
                 }
-                threat_results["vulnerabilities"] = {"status": "skipped"}
-                ui.warn("Fingerprinting omitido: Docker o wappalyzer-next no disponibles.")
+                out["vulnerabilities"] = {"status": "skipped"}
             elif not urls:
-                threat_results["fingerprinting"] = {"status": "skipped"}
-                threat_results["vulnerabilities"] = {"status": "skipped"}
+                out["fingerprinting"] = {"status": "skipped"}
+                out["vulnerabilities"] = {"status": "skipped"}
             else:
-                with ui.progress_status("Detectando tecnologías y buscando vulnerabilidades…"):
-                    tech_results = fp.scan(urls)
-                    threat_results["fingerprinting"] = tech_results
-                    threat_results["vulnerabilities"] = CveExploitScanner().scan(tech_results)
-                ui.table_technologies(threat_results["fingerprinting"])
-                ui.table_cves(threat_results["vulnerabilities"])
+                tech_results = fp.scan(urls)
+                out["fingerprinting"] = tech_results
+                out["vulnerabilities"] = CveExploitScanner().scan(tech_results)
         except Exception as e:  # noqa: BLE001
-            ui.error(f"Error en la fase de fingerprinting: {e}")
-            threat_results["fingerprinting"] = {"status": "error", "message": str(e)}
-            threat_results["vulnerabilities"] = {"status": "skipped"}
-    else:
-        threat_results["fingerprinting"] = {"status": "skipped"}
-        threat_results["vulnerabilities"] = {"status": "skipped"}
+            out["fingerprinting"] = {"status": "error", "message": str(e)}
+            out["vulnerabilities"] = {"status": "skipped"}
+        return out
 
-    # --- FASE 4: monitorización de exposición y filtraciones ---
-    if do_dw:
-        ui.phase("FASE 4", "MONITORIZACIÓN DE EXPOSICIÓN Y FILTRACIONES",
-                 "Brechas (XposedOrNot/HIBP) · Índice dark web (Ahmia) · Paste sites" +
-                 (" · Tor" if args.tor else ""))
+    def _fase_exposicion() -> dict:
+        """FASE 4: brechas + dark web + pastes + IOCs. Devuelve dict parcial."""
         from scripts.modules.exposure import ExposureMonitor
 
         # Correos a vigilar: los que descubre Hunter + la lista manual de .env.
@@ -212,22 +208,56 @@ def analyze_domain(domain, args, do_fp, do_dw):
             emails += [e.get("value", "") for e in hunter.get("emails", []) if e.get("value")]
         emails += [e for e in os.getenv("MONITOR_EMAILS", "").replace(";", ",").split(",") if e.strip()]
 
+        out: dict = {}
         try:
-            with ui.progress_status("Consultando brechas, índices de dark web y paste sites…"):
-                threat_results["darkweb"] = ExposureMonitor(
-                    domain, emails=emails, run_tor=args.tor, threads=args.threads
-                ).run_all()
-            ui.table_exposure(threat_results["darkweb"])
-
+            dw = ExposureMonitor(
+                domain, emails=emails, run_tor=args.tor, threads=args.threads
+            ).run_all()
             # Exportar IOCs detectados (emails, credenciales, IPs, hashes, cripto…)
-            ioc_result = threat_results["darkweb"].get("iocs", {})
+            ioc_result = dw.get("iocs", {})
             if ioc_result.get("total"):
                 from scripts.modules.ioc_extractor import export_iocs
-                paths = export_iocs(ioc_result, args.output_dir, domain)
-                threat_results["darkweb"]["ioc_files"] = paths
+                dw["ioc_files"] = export_iocs(ioc_result, args.output_dir, domain)
+            out["darkweb"] = dw
         except Exception as e:  # noqa: BLE001
-            threat_results["darkweb"] = {"status": "error", "message": str(e)}
-            ui.error(f"Monitorización de exposición: {e}")
+            out["darkweb"] = {"status": "error", "message": str(e)}
+        return out
+
+    # Construir solo las fases activas y lanzarlas juntas.
+    par_tasks = {}
+    if do_fp:
+        par_tasks["fingerprint"] = _fase_fingerprint
+    if do_dw:
+        par_tasks["exposicion"] = _fase_exposicion
+
+    if par_tasks:
+        ui.phase("FASES 2.5 + 4", "FINGERPRINTING ‖ EXPOSICIÓN (en paralelo)",
+                 ("Tecnologías+CVEs+INCIBE" if do_fp else "") +
+                 ("  ·  " if do_fp and do_dw else "") +
+                 ("Brechas+Dark web+Pastes" + (" · Tor" if args.tor else "") if do_dw else ""))
+        from scripts.modules.utils import run_named_parallel as _run_named_parallel
+        with ui.progress_status("Ejecutando fingerprinting y exposición en paralelo…"):
+            par_out = _run_named_parallel(par_tasks, max_workers=len(par_tasks))
+        # Cada función escribe claves distintas (fingerprinting/vulnerabilities vs darkweb).
+        for sub in par_out.values():
+            if isinstance(sub, dict):
+                threat_results.update(sub)
+
+    # Render de tablas (secuencial, tras el join).
+    if do_fp:
+        if threat_results.get("fingerprinting", {}).get("status") == "error":
+            ui.warn(f"Fingerprinting: {threat_results['fingerprinting'].get('message', 'error')}")
+        ui.table_technologies(threat_results.get("fingerprinting", {}))
+        ui.table_cves(threat_results.get("vulnerabilities", {}))
+    else:
+        threat_results["fingerprinting"] = {"status": "skipped"}
+        threat_results["vulnerabilities"] = {"status": "skipped"}
+
+    if do_dw:
+        if threat_results.get("darkweb", {}).get("status") == "error":
+            ui.error(f"Monitorización de exposición: {threat_results['darkweb'].get('message', 'error')}")
+        else:
+            ui.table_exposure(threat_results.get("darkweb", {}))
     else:
         threat_results["darkweb"] = {"status": "skipped"}
 

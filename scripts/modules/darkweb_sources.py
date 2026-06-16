@@ -43,6 +43,14 @@ TOR_PROXIES = {
 }
 TOR_UA = "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
 
+# ── Presupuestos de tiempo (segundos) ──────────────────────────────────────────
+# Son límites GLOBALES para los barridos en paralelo: al agotarse, se devuelven
+# las fuentes que ya respondieron y se abandonan las colgadas (p. ej. un .onion
+# caído), de modo que NINGUNA fuente lenta pueda bloquear toda la fase.
+# Ajustables sin tocar código mediante variables de entorno.
+DARKWEB_BUDGET_S    = float(os.getenv("DARKWEB_BUDGET_S", "150"))    # barrido global de fuentes
+TOR_ENGINES_BUDGET_S = float(os.getenv("TOR_ENGINES_BUDGET_S", "90"))  # solo motores .onion
+
 # ── Keywords de fuga para búsquedas agresivas ─────────────────────────────────
 # Se combinan con el dominio objetivo para encontrar hilos/dumps que de otro modo
 # no aparecen al buscar el dominio "a secas" (así se indexan realmente las fugas).
@@ -525,7 +533,8 @@ def search_tor_engines(domain: str) -> List[Dict]:
     tasks = [(name, url_template, domain) for name, url_template in TOR_SEARCH_ENGINES]
     all_hits: List[Dict] = []
     for _, result in run_parallel(_search_one_tor_engine, tasks,
-                                   max_workers=len(TOR_SEARCH_ENGINES), label="tor_engines"):
+                                   max_workers=len(TOR_SEARCH_ENGINES), label="tor_engines",
+                                   timeout=TOR_ENGINES_BUDGET_S):
         if isinstance(result, list):
             all_hits.extend(result)
     return all_hits
@@ -924,7 +933,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
     if intelx_key:
         tasks["intelx"] = lambda: check_intelx_domain(domain, intelx_key)
 
-    par = run_named_parallel(tasks, max_workers=len(tasks))
+    par = run_named_parallel(tasks, max_workers=len(tasks), timeout=DARKWEB_BUDGET_S)
 
     # Leak sites de ransomware
     ls = par.get("leaksites") or {}

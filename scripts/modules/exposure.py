@@ -50,6 +50,12 @@ RANSOMWARE_LIVE = "https://api.ransomware.live"
 RANSOMLOOK      = "https://www.ransomlook.io"
 MALTIVERSE      = "https://api.maltiverse.com"
 
+# Presupuesto GLOBAL (segundos) para TODA la FASE 4 (todas las capas en paralelo).
+# Si se agota, las capas que no terminaron se marcan como {"status": "timeout"}
+# y el escaneo continúa con lo que haya: ninguna capa lenta (Tor/.onion) cuelga
+# la fase. Configurable con EXPOSURE_BUDGET_S. Debe ser >= DARKWEB_BUDGET_S.
+EXPOSURE_BUDGET_S = float(os.getenv("EXPOSURE_BUDGET_S", "240"))
+
 # Motores de búsqueda .onion accesibles via Tor (sin fingerprinting JS).
 # Las direcciones .onion v3 son estables (64 chars) pero algunos motores
 # migran periódicamente — si falla una, la herramienta continúa con las demás.
@@ -832,7 +838,7 @@ class ExposureMonitor:
             "tor":          (self.layer_tor if self.run_tor
                              else lambda: {"status": "skipped"}),
             "dark_sources": self.layer_darkweb_sources,
-        }, max_workers=6)
+        }, max_workers=6, timeout=EXPOSURE_BUDGET_S)
 
         breaches     = layer_results.get("breaches",     {})
         ahmia        = layer_results.get("ahmia",        {})

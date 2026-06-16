@@ -16,7 +16,7 @@ import logging
 import re
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 import requests
@@ -114,6 +114,7 @@ def run_parallel(
     items: Iterable,
     max_workers: int = 10,
     label: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> List[Tuple[Any, Any]]:
     """
     Ejecuta `func(item)` en paralelo sobre cada elemento de `items`.
@@ -123,6 +124,9 @@ def run_parallel(
 
     :param max_workers: número de hilos concurrentes.
     :param label: texto opcional para depuración.
+    :param timeout: presupuesto GLOBAL en segundos. Si se agota, se devuelven los
+                    resultados ya disponibles y NO se espera a los hilos colgados
+                    (se cancelan los pendientes). Garantiza que la fase no se cuelga.
     """
     items = list(items)
     if not items:
@@ -132,9 +136,10 @@ def run_parallel(
     workers = max(1, min(max_workers, len(items)))
     results: List[Tuple[Any, Any]] = []
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_item = {executor.submit(func, item): item for item in items}
-        for future in as_completed(future_to_item):
+    executor = ThreadPoolExecutor(max_workers=workers)
+    future_to_item = {executor.submit(func, item): item for item in items}
+    try:
+        for future in as_completed(future_to_item, timeout=timeout):
             item = future_to_item[future]
             try:
                 results.append((item, future.result()))
@@ -142,14 +147,27 @@ def run_parallel(
                 if label:
                     logger.debug(f"    [!] Error en {label} para {item}: {exc}")
                 results.append((item, exc))
+    except FuturesTimeout:
+        done = {id(f) for f in future_to_item if f.done()}
+        pendientes = sum(1 for f in future_to_item if id(f) not in done)
+        logger.debug(f"    [!] {label or 'run_parallel'}: timeout global {timeout}s, "
+                     f"{pendientes} tarea(s) sin terminar abandonada(s)")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return results
 
 
-def run_named_parallel(tasks: dict, max_workers: int = 13) -> dict:
+def run_named_parallel(tasks: dict, max_workers: int = 13,
+                       timeout: Optional[float] = None) -> dict:
     """
     Ejecuta un diccionario {nombre: callable_sin_argumentos} en paralelo.
     Devuelve {nombre: resultado}. Las excepciones se capturan por tarea.
     Ideal para lanzar varias APIs a la vez.
+
+    :param timeout: presupuesto GLOBAL en segundos. Si se agota, las tareas no
+                    terminadas se marcan como {"status": "timeout"} y NO se espera
+                    a los hilos colgados (se cancelan los pendientes). Evita que
+                    una fuente lenta (p. ej. un .onion caído) bloquee toda la fase.
     """
     if not tasks:
         return {}
@@ -158,15 +176,25 @@ def run_named_parallel(tasks: dict, max_workers: int = 13) -> dict:
     results: dict = {}
     workers = max(1, min(max_workers, len(tasks)))
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_name = {executor.submit(fn): name for name, fn in tasks.items()}
-        for future in as_completed(future_to_name):
+    executor = ThreadPoolExecutor(max_workers=workers)
+    future_to_name = {executor.submit(fn): name for name, fn in tasks.items()}
+    try:
+        for future in as_completed(future_to_name, timeout=timeout):
             name = future_to_name[future]
             try:
                 results[name] = future.result()
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"    [!] Tarea '{name}' falló: {exc}")
                 results[name] = {"status": "error", "message": str(exc)}
+    except FuturesTimeout:
+        completadas = len(results)
+        for name in tasks:
+            results.setdefault(name, {"status": "timeout",
+                                      "message": f"excedió el presupuesto de {timeout}s"})
+        logger.debug(f"    [!] run_named_parallel: timeout global {timeout}s, "
+                     f"{completadas}/{len(tasks)} tarea(s) completada(s)")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return results
 
 
