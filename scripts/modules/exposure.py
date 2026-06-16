@@ -85,12 +85,16 @@ def _tor_available() -> bool:
 
 class ExposureMonitor:
     def __init__(self, domain: str, emails: Optional[List[str]] = None,
-                 run_tor: bool = False, threads: int = 10):
+                 run_tor: bool = False, threads: int = 10,
+                 use_browser: bool = False):
         self.domain   = domain.lower().strip()
         # Los correos llegan auto-descubiertos desde Hunter (main.py).
         self.emails   = sorted({e.lower().strip() for e in (emails or []) if "@" in e})
         self.run_tor  = run_tor
         self.threads  = threads
+        # Renderizado con Firefox/Playwright (opcional, --browser). Solo se usa
+        # como respaldo cuando una página depende de JavaScript.
+        self.use_browser = use_browser
         self.session  = make_session()
         self.hibp_key       = os.getenv("HIBP_API_KEY", "")
         self.intelx_key     = os.getenv("INTELX_API_KEY", "")
@@ -822,6 +826,7 @@ class ExposureMonitor:
             intelx_key    = self.intelx_key,
             use_tor       = self._tor_up,
             scan_leaksites= self._tor_up,  # solo si Tor activo
+            use_browser   = self.use_browser,
         )
         return result
 

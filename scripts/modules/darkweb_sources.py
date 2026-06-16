@@ -804,7 +804,8 @@ def _parse_telegram_messages(html: str, channel: str) -> List[Dict]:
     return mensajes
 
 
-def search_telegram_leak_channels(domain: str, max_msgs_per_channel: int = 6) -> List[Dict]:
+def search_telegram_leak_channels(domain: str, max_msgs_per_channel: int = 6,
+                                  use_browser: bool = False) -> List[Dict]:
     """
     Busca menciones del dominio en canales públicos de Telegram de leaks/brechas
     y extrae los IOCs de CADA mensaje coincidente.
@@ -834,9 +835,17 @@ def search_telegram_leak_channels(domain: str, max_msgs_per_channel: int = 6) ->
             r = request_with_retry(sess, url, timeout=15, retries=1,
                                    rotate_circuit_on_fail=False,
                                    accept_status=(200,))
-            if r is None:
-                continue
-            for msg in _parse_telegram_messages(r.text, channel):
+            html_text = r.text if r is not None else None
+            parsed = _parse_telegram_messages(html_text, channel) if html_text else []
+            # Respaldo con Firefox: si requests falló o la vista web no devolvió
+            # mensajes (a veces Telegram los carga por JS), renderizamos con el
+            # navegador. Solo si --browser está activo (clearnet, sin Tor).
+            if use_browser and not parsed:
+                from .browser_fetch import get_fetcher
+                rendered = get_fetcher(use_tor=False).fetch(url)
+                if rendered:
+                    parsed = _parse_telegram_messages(rendered, channel)
+            for msg in parsed:
                 low = msg["text"].lower()
                 matched = next((v for v in variants[:3] if v.lower() in low), None)
                 if not matched:
@@ -879,7 +888,8 @@ def search_telegram_leak_channels(domain: str, max_msgs_per_channel: int = 6) ->
 
 def run_full_darkweb_scan(domain: str, intelx_key: str = "",
                            use_tor: bool = True,
-                           scan_leaksites: bool = True) -> Dict:
+                           scan_leaksites: bool = True,
+                           use_browser: bool = False) -> Dict:
     """
     Orquesta todas las fuentes de dark web disponibles y devuelve un
     resumen consolidado con nivel de riesgo.
@@ -924,7 +934,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
         "hudson_rock": lambda: check_hudson_rock(domain),
         "pulsedive": lambda: check_pulsedive(domain),
         "paste_sites": lambda: search_paste_sites(domain, use_tor=use_tor),
-        "telegram": lambda: search_telegram_leak_channels(domain),
+        "telegram": lambda: search_telegram_leak_channels(domain, use_browser=use_browser),
     }
     if use_tor and scan_leaksites:
         tasks["leaksites"] = lambda: scan_all_ransomware_leaksites(domain, max_sites=80)

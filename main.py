@@ -56,6 +56,11 @@ def parse_args(argv=None):
         "--tor", action="store_true",
         help="Capa avanzada: crawling .onion vía Tor (requiere Tor en :9050). Desactivada por defecto.",
     )
+    p.add_argument(
+        "--browser", action="store_true",
+        help="Renderizar páginas con JS usando Firefox/Playwright (respaldo en dark web). "
+             "Desactivado por defecto: consume RAM. Requiere 'playwright install firefox'.",
+    )
     p.add_argument("--no-active", action="store_true", help="Omitir verificación ICMP/TCP de hosts.")
     p.add_argument("--no-diff", action="store_true", help="No comparar con el escaneo anterior (modo monitorización).")
     p.add_argument("--all", action="store_true", help="Ejecutar todas las fases (fingerprint + darkweb).")
@@ -211,7 +216,8 @@ def analyze_domain(domain, args, do_fp, do_dw):
         out: dict = {}
         try:
             dw = ExposureMonitor(
-                domain, emails=emails, run_tor=args.tor, threads=args.threads
+                domain, emails=emails, run_tor=args.tor, threads=args.threads,
+                use_browser=args.browser
             ).run_all()
             # Exportar IOCs detectados (emails, credenciales, IPs, hashes, cripto…)
             ioc_result = dw.get("iocs", {})
@@ -342,14 +348,20 @@ def main(argv=None):
     )
 
     total = 0.0
-    for i, domain in enumerate(domains, 1):
-        ui.domain_header(domain, i, len(domains))
-        try:
-            total += analyze_domain(domain, args, do_fp, do_dw)
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:  # noqa: BLE001
-            ui.error(f"Error analizando {domain}: {e}")
+    try:
+        for i, domain in enumerate(domains, 1):
+            ui.domain_header(domain, i, len(domains))
+            try:
+                total += analyze_domain(domain, args, do_fp, do_dw)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:  # noqa: BLE001
+                ui.error(f"Error analizando {domain}: {e}")
+    finally:
+        # Cierra el navegador compartido (si se usó --browser) y libera su RAM.
+        if args.browser:
+            from scripts.modules.browser_fetch import close_fetcher
+            close_fetcher()
 
     if ui.enabled():
         ui.console.rule("[bold green]✅ COMPLETADO")

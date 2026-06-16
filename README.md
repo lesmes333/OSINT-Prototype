@@ -328,6 +328,7 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 | `--fingerprint / --no-fingerprint` | Activa/desactiva fingerprinting + CVEs + INCIBE. |
 | `--darkweb / --no-darkweb` | Activa/desactiva la monitorización de exposición (brechas, Ahmia, pastes). |
 | `--tor` | Capa avanzada: crawling `.onion` vía Tor (requiere Tor en `:9050`). Desactivada por defecto. |
+| `--browser` | Renderiza páginas con JavaScript usando Firefox/Playwright (respaldo en dark web, p. ej. Telegram). Desactivado por defecto: consume RAM. Requiere `playwright install firefox`. |
 | `--no-active` | Omite la verificación ICMP/TCP. |
 | `--no-diff` | No compara con el escaneo anterior (desactiva la monitorización). |
 | `-t, --threads` | Hilos concurrentes (def: 30). |
@@ -335,6 +336,21 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 | `-o, --output-dir` | Carpeta de salida (def: `outputs`). |
 | `--max-fp-urls` | Máx. URLs para fingerprinting (def: 25). |
 | `-q / -v` | Salida mínima / detallada. |
+
+### ⚡ Rendimiento y robustez
+
+- **Fases en paralelo:** el fingerprinting (FASE 2.5) y la exposición/dark web (FASE 4) son independientes y se ejecutan **solapadas**, así que el escaneo total tarda prácticamente lo mismo que la fase más lenta de las dos.
+- **Anti-cuelgues:** cada barrido paralelo tiene un **presupuesto de tiempo global**. Si una fuente lenta (p. ej. un `.onion` caído) no responde, se devuelven los resultados parciales y se abandonan los hilos colgados — la fase nunca se queda atascada. Ajustable por entorno:
+
+  | Variable | Def. | Qué controla |
+  |---|---|---|
+  | `EXPOSURE_BUDGET_S` | `240` | Presupuesto global de toda la FASE 4. |
+  | `DARKWEB_BUDGET_S` | `150` | Barrido de fuentes dark web. |
+  | `TOR_ENGINES_BUDGET_S` | `90` | Solo los motores de búsqueda `.onion`. |
+  | `BROWSER_MIN_RAM_MB` | `700` | Mínimo de RAM libre para arrancar Firefox (`--browser`). Si hay menos, no se lanza (protección anti-OOM). |
+  | `BROWSER_PAGE_TIMEOUT` | `30` | Tiempo máximo por página renderizada. |
+
+> 💡 En máquinas con poca RAM y **sin swap**, usa `--browser` con moderación (idealmente sin `--fingerprint` a la vez). El navegador es un único Firefox headless reutilizado, con concurrencia 1 y bloqueo de imágenes/CSS para minimizar memoria.
 
 ### 🔁 Modo monitorización (diff entre escaneos)
 
