@@ -95,7 +95,16 @@ Cada entidad acumula **sus fuentes** y de ahí sale un **grado de confianza** se
 | **C** 🟠 | Una sola fuente media (un foro/paste) |
 | **D** ⚪ | Inferencia (una fuente débil: buscador `.onion`/pivoting por subcadena) |
 
-La **fiabilidad de la fuente** se pondera (CTI curada y registros DNS/WHOIS = `trusted`; foros/markets/pastes = `mixed`; buscadores `.onion`/pivoting = `unknown`), así un email visto en una brecha verificada **Y** en un foro **Y** por pivoting sube a grado A, mientras que una coincidencia por subcadena en un buscador se queda en D. El grafo aparece como tabla en el informe HTML y Markdown (sección *Entidades correlacionadas*) y completo en el JSON. Además, el informe **HTML incluye un grafo visual interactivo** (vis-network): nodos = entidades coloreadas por grado de confianza (🟢 A · 🔵 B · 🟠 C · ⚪ D), aristas = relaciones; se arrastra y se hace zoom. Si no hay conexión para cargar la librería, muestra un aviso y queda la tabla con los mismos datos.
+La **fiabilidad de la fuente** se pondera (CTI curada y registros DNS/WHOIS = `trusted`; foros/markets/pastes = `mixed`; buscadores `.onion`/pivoting = `unknown`), así un email visto en una brecha verificada **Y** en un foro **Y** por pivoting sube a grado A, mientras que una coincidencia por subcadena en un buscador se queda en D. El grafo aparece como tabla en el informe HTML y Markdown (sección *Entidades correlacionadas*) y completo en el JSON.
+
+Además, el informe **HTML incluye un grafo visual interactivo** (vis-network): nodos = entidades coloreadas por grado de confianza (🟢 A · 🔵 B · 🟠 C · ⚪ D), aristas = relaciones. Cómo moverte por él:
+
+- **Mover:** arrastra un punto para recolocarlo, o arrastra el fondo para desplazar la vista.
+- **Zoom:** haz **pellizco (pinch) en el trackpad** del Mac/portátil, o **Ctrl/⌘ + scroll** sobre el grafo (el scroll normal sigue moviendo la página, sin secuestrarla). También tienes los botones **＋ / − / ⤢ Ajustar todo**. El zoom se ancla al cursor.
+- **Resaltar conexiones:** haz **clic** en un punto para iluminar solo ese nodo y sus vecinos, atenuando el resto. Clic en el fondo o «Ajustar todo» lo restaura.
+- **Buscar:** escribe en el **buscador** (subdominio, IP, email, tecnología…) y el grafo resalta y encuadra las entidades que coinciden (busca sobre el valor completo, no la etiqueta recortada).
+
+Si no hay conexión para cargar la librería, muestra un aviso y queda la tabla con los mismos datos.
 
 ### 🌐 Búsqueda agresiva y multilingüe
 
@@ -166,7 +175,7 @@ Al terminar, la herramienta indica qué **API keys están caducadas/inválidas o
 ```
 Paneles por fase, tablas con colores, **severidades coloreadas** (🔴 CRITICAL · 🟠 HIGH · 🟡 MEDIUM · 🟢 LOW), avisos de claves a renovar y un panel de resumen final. Si `rich` no está instalado, degrada a texto plano automáticamente.
 
-El **informe HTML** es autocontenido (tema oscuro, tarjetas de resumen, badges de severidad) y se abre directamente en el navegador.
+El **informe HTML** es autocontenido (tema oscuro, tarjetas de resumen, badges de severidad) y se abre directamente en el navegador. Arriba del todo incluye un **📋 Resumen ejecutivo**: en una sola mirada destaca lo accionable —vulnerabilidades críticas/altas (y cuántas tienen exploit público), claves de API a renovar, exposición en dark web y entidades nuevas desde el último escaneo—, con un enlace en cada punto que salta a su sección. Si no hay nada grave, lo dice claramente (✅) en vez de dejarlo en blanco.
 
 ---
 
@@ -401,7 +410,7 @@ Cada escaneo crea **su propia subcarpeta** dentro de `outputs/` (o la carpeta in
 
 | Archivo | Contenido |
 |---------|-----------|
-| `<dominio>_informe_<dd-mm-aaaa_HHhMM>.html` | **Informe visual** (abrir en navegador): resumen, diagnóstico, subdominios, DNS, WHOIS, tecnologías, CVEs con severidad y enlaces INCIBE-CERT, dark web y **grafo de entidades interactivo**. |
+| `<dominio>_informe_<dd-mm-aaaa_HHhMM>.html` | **Informe visual** (abrir en navegador): **resumen ejecutivo** con lo accionable arriba del todo, diagnóstico, subdominios, DNS, WHOIS, tecnologías, CVEs con severidad y enlaces INCIBE-CERT, dark web y **grafo de entidades interactivo** (zoom con pinch/trackpad, buscador y resaltado de conexiones). |
 | `<dominio>_informe_<dd-mm-aaaa_HHhMM>.md` | Mismo contenido en Markdown (para GitHub/lectura rápida). |
 | `<dominio>_activos_<dd-mm-aaaa_HHhMM>.json` | Datos completos y estructurados (para automatización). |
 | `<dominio>_subdominios_<dd-mm-aaaa_HHhMM>.csv` | Lista de subdominios con su(s) fuente(s). |
