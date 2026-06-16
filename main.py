@@ -293,6 +293,14 @@ def analyze_domain(domain, args, do_fp, do_dw):
         changes = diffing.compute(current_snapshot, args.output_dir, slug)
         ui.table_changes(changes)
 
+    # --- CORRELACIÓN: grafo de entidades + confidence scoring ---
+    try:
+        from scripts.modules.entities import build_entity_graph
+        threat_results["entities"] = build_entity_graph(
+            domain, discovery_results, threat_results)
+    except Exception as e:  # noqa: BLE001
+        threat_results["entities"] = {"status": "error", "message": str(e)}
+
     # --- FASE 3: informes ---
     ui.phase("FASE 3", "GENERACIÓN DE INFORMES", f"Formatos: {args.formats} → {args.output_dir}/")
     formats = {f.strip() for f in args.formats.split(",") if f.strip()}

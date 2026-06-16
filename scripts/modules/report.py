@@ -77,6 +77,7 @@ footer b{{color:var(--accent)}}
 {cve_section}
 {ew_section}
 {dw_section}
+{entities_section}
 <footer>Generado por <b>OSINT Recon Suite</b> · Created by Cristian &amp; Luisber</footer>
 </div></body></html>"""
 
@@ -771,6 +772,29 @@ class ReportGenerator:
         else:
             md_content += "No se detectaron problemas con las API keys o cuotas.\n"
 
+        # ========== ENTIDADES CORRELACIONADAS + CONFIDENCE SCORING ==========
+        ent = threat_data.get('entities', {})
+        if isinstance(ent, dict) and ent.get('entities'):
+            st = ent.get('stats', {})
+            bg = st.get('by_grade', {})
+            _glabel = {"A": "🟢 A confirmado", "B": "🟡 B verificado",
+                       "C": "🟠 C una fuente", "D": "⚪ D inferencia"}
+            md_content += f"\n---\n\n## 🕸️ Entidades correlacionadas ({st.get('total', 0)})\n\n"
+            md_content += ("Todo lo hallado, normalizado a entidades con un **grado de confianza** "
+                           "según cuántas fuentes (y de qué fiabilidad) lo corroboran "
+                           f"({st.get('relations', 0)} relaciones detectadas).\n\n")
+            md_content += "**Confianza:** " + " · ".join(
+                f"{_glabel[g]}: {bg.get(g, 0)}" for g in ('A', 'B', 'C', 'D') if bg.get(g)) + "\n\n"
+            md_content += "| Tipo | Valor | Confianza | #Fuentes | Fuentes |\n"
+            md_content += "|------|-------|-----------|----------|--------|\n"
+            for e in ent['entities'][:80]:
+                fuentes = ', '.join(e.get('sources', []))[:90]
+                md_content += (f"| {e.get('type','')} | `{str(e.get('value',''))[:70]}` | "
+                               f"{e.get('grade','')} | {e.get('n_sources',0)} | {fuentes} |\n")
+            if st.get('total', 0) > 80:
+                md_content += f"\n> Mostrando 80 de {st.get('total', 0)} entidades (por confianza). Todas en el JSON.\n"
+            md_content += "\n"
+
         # ========== HERRAMIENTAS MANUALES Y LIMITACIONES ==========
         md_content += f"""
 
@@ -1335,6 +1359,48 @@ class ReportGenerator:
                 f"</section>"
             )
 
+        # ---- Grafo de entidades + confidence scoring ----
+        entities_section = ""
+        ent = threat_data.get('entities', {})
+        if isinstance(ent, dict) and ent.get('entities'):
+            st = ent.get('stats', {})
+            bg = st.get('by_grade', {})
+            bt = st.get('by_type', {})
+            _gbadge = {"A": "low", "B": "med", "C": "high", "D": "unk"}
+            _glabel = {"A": "A · confirmado", "B": "B · verificado",
+                       "C": "C · una fuente", "D": "D · inferencia"}
+            grade_chips = "".join(
+                f"<span class='badge {_gbadge.get(gr, 'unk')}'>{_glabel[gr]}: {bg.get(gr, 0)}</span> "
+                for gr in ('A', 'B', 'C', 'D') if bg.get(gr)
+            )
+            type_chips = "".join(
+                f"<span class='badge unk'>{escape(t)}: {n}</span> "
+                for t, n in sorted(bt.items(), key=lambda x: -x[1])
+            )
+            ent_rows = "".join(
+                f"<tr><td class='muted'>{escape(str(e.get('type', '')))}</td>"
+                f"<td>{escape(str(e.get('value', ''))[:90])}</td>"
+                f"<td><span class='badge {_gbadge.get(e.get('grade'), 'unk')}'>"
+                f"{escape(str(e.get('grade', '')))}</span></td>"
+                f"<td class='muted'>{e.get('n_sources', 0)}</td>"
+                f"<td class='muted'>{escape(', '.join(e.get('sources', []))[:120])}</td></tr>"
+                for e in ent['entities'][:120]
+            )
+            extra = ""
+            if st.get('total', 0) > 120:
+                extra = (f"<p class='muted'>Mostrando 120 de {st.get('total', 0)} entidades "
+                         f"(ordenadas por confianza). Todas en el JSON.</p>")
+            entities_section = (
+                f"<section><h2>🕸️ Entidades correlacionadas ({st.get('total', 0)})</h2>"
+                f"<p class='muted'>Todo lo hallado, normalizado a entidades con un "
+                f"<b>grado de confianza</b> según cuántas fuentes (y de qué fiabilidad) lo "
+                f"corroboran. {st.get('relations', 0)} relaciones detectadas.</p>"
+                f"<p>{grade_chips}</p><p>{type_chips}</p>"
+                f"<table><thead><tr><th>Tipo</th><th>Valor</th><th>Confianza</th>"
+                f"<th>#Fuentes</th><th>Fuentes</th></tr></thead>"
+                f"<tbody>{ent_rows}</tbody></table>{extra}"
+            )
+
         whois = discovery_data.get('whois', {})
         whois_html = "".join(
             f"<tr><td><b>{escape(k)}</b></td><td>{escape(str(v)[:120])}</td></tr>"
@@ -1442,6 +1508,7 @@ class ReportGenerator:
             cve_section=cve_section,
             ew_section=ew_section,
             dw_section=dw_section,
+            entities_section=entities_section,
         )
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(html)

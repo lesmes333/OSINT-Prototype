@@ -82,6 +82,21 @@ Los IOCs se incluyen en el informe JSON y, además, se exportan a archivos propi
 
 > Los regex están validados (p. ej. las IPv6 se confirman con `ipaddress`, no por regex puro) y filtran falsos positivos comunes (fragmentos de email, nombres de fichero `.txt`/`.sql`, etc.).
 
+### 🕸️ Grafo de entidades + confidence scoring
+
+OSINT no son tablas sueltas, son **relaciones**. Tras el escaneo, `entities.py` **normaliza todo** lo hallado (subdominios, IPs, emails, credenciales, `.onion`, wallets, hashes, CVEs…) a un único grafo de **entidades + relaciones**, deduplicado.
+
+Cada entidad acumula **sus fuentes** y de ahí sale un **grado de confianza** según cuántas fuentes —y de qué fiabilidad— la corroboran:
+
+| Grado | Significado |
+|-------|-------------|
+| **A** 🟢 | Confirmado (≥3 fuentes, o ≥2 con al menos una fiable) |
+| **B** 🟡 | Verificado (1 fuente fiable, o ≥2 fuentes) |
+| **C** 🟠 | Una sola fuente media (un foro/paste) |
+| **D** ⚪ | Inferencia (una fuente débil: buscador `.onion`/pivoting por subcadena) |
+
+La **fiabilidad de la fuente** se pondera (CTI curada y registros DNS/WHOIS = `trusted`; foros/markets/pastes = `mixed`; buscadores `.onion`/pivoting = `unknown`), así un email visto en una brecha verificada **Y** en un foro **Y** por pivoting sube a grado A, mientras que una coincidencia por subcadena en un buscador se queda en D. El grafo aparece en el informe HTML y Markdown (sección *Entidades correlacionadas*) y completo en el JSON. Es la base para el timeline y la visualización de grafo previstos.
+
 ### 🌐 Búsqueda agresiva y multilingüe
 
 La búsqueda de fugas combina el dominio con vocabulario real de brecha en **inglés, español y ruso** (`generate_breach_queries()`): `leak`, `dump`, `database`, `combolist`, `filtracion`, `contraseñas`, `слив`, `база`, `дамп`… además de variantes con año, `www`, `@dominio` y patrones de fichero de dump. Esto saca a la luz dumps que no aparecen buscando solo el dominio.
@@ -106,7 +121,7 @@ cp darkweb_onions.example.json darkweb_onions.json
 **🩺 Salud de los `.onion` y descubrimiento automático** (con `--tor`): como las direcciones `.onion` rotan, cambian o caen constantemente, en cada escaneo la herramienta:
 
 - **Vigila la salud** de los `.onion` conocidos (foros que configuraste + motores de búsqueda) y los clasifica: 🟢 operativo · 🟡 bloqueado (captcha/anti-bot) · 🔴 caído (probablemente rotó o fue incautado). Si alguno cae o se bloquea, el informe **avisa** para que actualices `darkweb_onions.json`.
-- **Descubre `.onion` nuevas** crawleando directorios curados (**The Hidden Wiki**, tortaxi…). Las direcciones halladas salen en el informe como *semillas descubiertas* — úsalas para sustituir las que hayan rotado.
+- **Descubre `.onion` nuevas** crawleando directorios curados (**The Hidden Wiki**, tortaxi…). Las direcciones halladas salen en el informe como *semillas descubiertas* — úsalas para sustituir las que hayan rotado. Puedes **añadir más directorios** (recomendado: **dark.fail** y **Daunt**, listas de mirrors verificados con PGP) copiando `darkweb_seeds.example.json` → `darkweb_seeds.json` y pegando sus direcciones actuales.
 
 Ambas cosas aparecen en el informe HTML y en el Markdown (secciones *Salud de los .onion vigilados* y *Semillas .onion descubiertas*).
 

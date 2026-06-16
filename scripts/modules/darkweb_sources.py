@@ -16,6 +16,7 @@ Todos los accesos son pasivos y defensivos: solo se lee contenido público
 indexado. No se interactúa con sistemas objetivo ni formularios de login.
 """
 
+import json
 import os
 import re
 import time
@@ -557,6 +558,37 @@ ONION_SEED_DIRECTORIES = [
     # Es una de las mejores fuentes para descubrir direcciones nuevas/actuales.
     ("hiddenwiki", "http://zqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otjiycgwqbym2qad.onion/wiki/index.php/Main_Page"),
 ]
+
+# Los DIRECTORIOS también rotan, así que (igual que con darkweb_onions.json) se
+# pueden ampliar/corregir desde un fichero externo gitignored sin tocar código.
+# Recomendado añadir ahí dark.fail y Daunt (listas de mirrors verificados con
+# PGP, ideales contra la rotación). Formato: {"directories": {"darkfail": "http://…onion"}}
+SEEDS_CONFIG_ENV = "DARKWEB_SEEDS_FILE"
+SEEDS_CONFIG_DEFAULT = "darkweb_seeds.json"
+
+
+def _load_seed_directories() -> List[tuple]:
+    """Directorios semilla incrustados + los del fichero externo (si existe)."""
+    dirs = list(ONION_SEED_DIRECTORIES)
+    path = os.getenv(SEEDS_CONFIG_ENV, SEEDS_CONFIG_DEFAULT)
+    if not os.path.isfile(path):
+        return dirs
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        extra = data.get("directories", {}) if isinstance(data, dict) else {}
+        conocidos = {n for n, _ in dirs}
+        for nombre, url in extra.items():
+            if not url or not isinstance(url, str):
+                continue
+            if nombre in conocidos:  # override de una incrustada
+                dirs = [(n, url if n == nombre else u) for n, u in dirs]
+            else:
+                dirs.append((nombre, url.rstrip("/")))
+        log.info("   [*] darkweb_seeds.json cargado: %d directorio(s) extra", len(extra))
+    except (OSError, ValueError) as e:
+        log.debug("darkweb_seeds config: %s", e)
+    return dirs
 # .onion v3: 56 chars en base32 (a-z y 2-7) + ".onion".
 _RE_ONION_ADDR = re.compile(r"\b([a-z2-7]{56})\.onion", re.IGNORECASE)
 
@@ -569,7 +601,7 @@ def discover_onion_seeds(max_links: int = 60) -> List[Dict]:
     """
     seeds: List[Dict] = []
     seen: set = set()
-    for nombre, base in ONION_SEED_DIRECTORIES:
+    for nombre, base in _load_seed_directories():
         try:
             sess = _tu_tor_session(timeout=20)
             r = request_with_retry(sess, base, timeout=20, retries=1,

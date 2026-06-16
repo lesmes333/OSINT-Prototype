@@ -1,0 +1,8 @@
+{
+  "_comment": "Copia este archivo a 'darkweb_seeds.json' (gitignored) para AMPLIAR los directorios .onion que se crawlean en busca de direcciones nuevas. Los directorios también rotan, por eso van en config y no en el código. Pega aquí direcciones .onion VERIFICADAS y ACTUALES. Recomendados: dark.fail y Daunt (listas de mirrors verificados con PGP, lo mejor contra la rotación). Las claves son etiquetas libres; si repites el nombre de un directorio incrustado (tortaxi/hiddenwiki) lo sobreescribes.",
+
+  "directories": {
+    "darkfail": "",
+    "daunt": ""
+  }
+}
