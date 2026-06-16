@@ -699,6 +699,35 @@ class ReportGenerator:
                     pd_feeds = ', '.join(pd.get('feeds', [])[:3]) or 'N/A'
                     md_content += f"**Pulsedive (domain threat intel):** riesgo `{pd_risk}` · feeds: {pd_feeds}\n\n"
 
+                # Salud de los .onion vigilados (rotación / caídas / bloqueos)
+                onion_health = ds.get('onion_health', [])
+                if onion_health:
+                    _htxt = {"ok": "🟢 operativo", "blocked": "🟡 bloqueado", "down": "🔴 caído"}
+                    _horder = {"down": 0, "blocked": 1, "ok": 2}
+                    n_down = sum(1 for h in onion_health if h.get('estado') == 'down')
+                    n_blk  = sum(1 for h in onion_health if h.get('estado') == 'blocked')
+                    md_content += f"**🩺 Salud de los .onion vigilados ({len(onion_health)}):**\n\n"
+                    if n_down or n_blk:
+                        md_content += (f"> ⚠️ {n_down} caído(s) y {n_blk} bloqueado(s). Los .onion rotan "
+                                       f"con frecuencia: actualiza `darkweb_onions.json` con las "
+                                       f"direcciones nuevas (ver semillas descubiertas).\n\n")
+                    md_content += "| Servicio | Categoría | Estado | Nota |\n|----------|-----------|--------|------|\n"
+                    for h in sorted(onion_health, key=lambda x: _horder.get(x.get('estado'), 3)):
+                        md_content += (f"| {h.get('servicio','')} | {h.get('categoria','')} | "
+                                       f"{_htxt.get(h.get('estado'),'?')} | {h.get('nota','')[:70]} |\n")
+                    md_content += "\n"
+
+                # Semillas .onion descubiertas (The Hidden Wiki, tortaxi…)
+                onion_seeds = ds.get('onion_seeds', [])
+                if onion_seeds:
+                    md_content += f"**🌱 Semillas .onion descubiertas ({len(onion_seeds)}):**\n\n"
+                    md_content += "> Servicios Tor hallados en directorios (descubrimiento, no menciones del dominio). Útiles para actualizar direcciones rotadas.\n\n"
+                    md_content += "| .onion | Título | Fuente |\n|--------|--------|--------|\n"
+                    for s in onion_seeds[:40]:
+                        md_content += (f"| `{s.get('onion','')}` | {s.get('titulo','')[:50]} | "
+                                       f"{s.get('fuente','')} |\n")
+                    md_content += "\n"
+
             # Capa 5: crawling .onion via Tor (si se ejecutó)
             raw_results = dw.get('raw_results', [])
             if raw_results:
@@ -1246,6 +1275,40 @@ class ReportGenerator:
                     f"<p>{seed_chips}</p>{hit_table}"
                 )
 
+            # ── Salud de los .onion vigilados (rotación / caídas / bloqueos) ──
+            health_section = ""
+            onion_health = ds_dw.get('onion_health', []) if isinstance(ds_dw, dict) else []
+            if onion_health:
+                _hbadge = {"ok": "low", "blocked": "med", "down": "crit"}
+                _htxt   = {"ok": "operativo", "blocked": "bloqueado", "down": "caído"}
+                _horder = {"down": 0, "blocked": 1, "ok": 2}
+                n_down = sum(1 for h in onion_health if h.get('estado') == 'down')
+                n_blk  = sum(1 for h in onion_health if h.get('estado') == 'blocked')
+                hrows = "".join(
+                    f"<tr><td>{escape(str(h.get('servicio', '')))}</td>"
+                    f"<td class='muted'>{escape(str(h.get('categoria', '')))}</td>"
+                    f"<td><span class='badge {_hbadge.get(h.get('estado'), 'unk')}'>"
+                    f"{_htxt.get(h.get('estado'), '?')}</span></td>"
+                    f"<td class='muted'>{escape(str(h.get('onion', '')))}</td>"
+                    f"<td class='muted'>{escape(str(h.get('nota', '')))}</td></tr>"
+                    for h in sorted(onion_health, key=lambda x: _horder.get(x.get('estado'), 3))
+                )
+                aviso = ""
+                if n_down or n_blk:
+                    aviso = (
+                        f"<p class='muted'>⚠️ {n_down} caído(s) y {n_blk} bloqueado(s). "
+                        f"Los .onion rotan con frecuencia: actualiza "
+                        f"<code>darkweb_onions.json</code> con las direcciones nuevas "
+                        f"(mira las semillas descubiertas más abajo).</p>"
+                    )
+                health_section = (
+                    f"<h3>🩺 Salud de los .onion vigilados ({len(onion_health)})</h3>"
+                    f"{aviso}"
+                    f"<table><thead><tr><th>Servicio</th><th>Categoría</th><th>Estado</th>"
+                    f"<th>.onion</th><th>Nota</th></tr></thead>"
+                    f"<tbody>{hrows}</tbody></table>"
+                )
+
             # ── Semillas .onion descubiertas (directorios tipo tortaxi) ───────
             seeds_section = ""
             onion_seeds = ds_dw.get('onion_seeds', []) if isinstance(ds_dw, dict) else []
@@ -1268,7 +1331,7 @@ class ReportGenerator:
                 f"<section><h2>🛡️ Exposición &amp; Dark Web</h2>"
                 f"{overview}"
                 f"{c1_section}{c2_section}{c3_section}{c4_section}{c6_section}{c5_section}"
-                f"{ioc_section}{pivot_section}{seeds_section}"
+                f"{ioc_section}{pivot_section}{health_section}{seeds_section}"
                 f"</section>"
             )
 

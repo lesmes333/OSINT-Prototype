@@ -103,6 +103,13 @@ cp darkweb_onions.example.json darkweb_onions.json
 
 - Los foros **sin dirección configurada** se descubren igualmente por **menciones en los motores `.onion`** (Ahmia/Torch). Cada hit de foro pasa por el extractor de IOCs.
 
+**🩺 Salud de los `.onion` y descubrimiento automático** (con `--tor`): como las direcciones `.onion` rotan, cambian o caen constantemente, en cada escaneo la herramienta:
+
+- **Vigila la salud** de los `.onion` conocidos (foros que configuraste + motores de búsqueda) y los clasifica: 🟢 operativo · 🟡 bloqueado (captcha/anti-bot) · 🔴 caído (probablemente rotó o fue incautado). Si alguno cae o se bloquea, el informe **avisa** para que actualices `darkweb_onions.json`.
+- **Descubre `.onion` nuevas** crawleando directorios curados (**The Hidden Wiki**, tortaxi…). Las direcciones halladas salen en el informe como *semillas descubiertas* — úsalas para sustituir las que hayan rotado.
+
+Ambas cosas aparecen en el informe HTML y en el Markdown (secciones *Salud de los .onion vigilados* y *Semillas .onion descubiertas*).
+
 > 💡 **Leak sites de ransomware** (LockBit, Akira, RansomHub, CL0P, Black Basta…): **no hay que configurar nada** — se obtienen dinámicamente de la API de `ransomware.live` (80+ grupos activos, autoactualizada) y se crawlean vía Tor.
 
 ### 📨 Monitorización de Telegram

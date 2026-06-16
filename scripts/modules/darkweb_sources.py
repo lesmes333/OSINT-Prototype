@@ -553,6 +553,9 @@ def search_tor_engines(domain: str) -> List[Dict]:
 # direcciones .onion nuevas (amplía el universo de servicios Tor conocidos).
 ONION_SEED_DIRECTORIES = [
     ("tortaxi", "http://tortaxi2dev6xjwbaydqzla77rrnth7yn2oqzjfmiuwn5h6vsk2a4syd.onion"),
+    # The Hidden Wiki: directorio curado clásico con cientos de enlaces .onion.
+    # Es una de las mejores fuentes para descubrir direcciones nuevas/actuales.
+    ("hiddenwiki", "http://zqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otjiycgwqbym2qad.onion/wiki/index.php/Main_Page"),
 ]
 # .onion v3: 56 chars en base32 (a-z y 2-7) + ".onion".
 _RE_ONION_ADDR = re.compile(r"\b([a-z2-7]{56})\.onion", re.IGNORECASE)
@@ -594,6 +597,100 @@ def discover_onion_seeds(max_links: int = 60) -> List[Dict]:
     if seeds:
         log.info("   [+] Semillas .onion descubiertas: %d (vía directorios)", len(seeds))
     return seeds
+
+
+# ── Salud de los .onion conocidos (rotación / caídas / cambios) ───────────────
+def _onion_targets_for_health() -> List[tuple]:
+    """
+    Lista (servicio, categoría, url_base) de .onion a vigilar:
+      · Foros/mercados con .onion verificada por el operador (darkweb_onions.json):
+        son los que MÁS rotan, así que avisar de su caída es lo más útil.
+      · Motores de búsqueda .onion incrustados (infraestructura propia).
+    """
+    from urllib.parse import urlparse
+    targets: List[tuple] = []
+    seen: set = set()
+
+    def _add(label: str, categoria: str, url: str):
+        if not url:
+            return
+        p = urlparse(url if "://" in url else "http://" + url)
+        base = f"{p.scheme}://{p.netloc}"
+        if ".onion" not in base or base in seen:
+            return
+        seen.add(base)
+        targets.append((label, categoria, base))
+
+    try:
+        from .darkweb_forums import load_forum_targets
+        for f in load_forum_targets():
+            if f.get("onion"):
+                _add(f["name"], "foro/mercado", f["onion"])
+    except Exception as e:  # noqa: BLE001
+        log.debug("    [!] health: load_forum_targets %s", e)
+
+    for name, tmpl in TOR_SEARCH_ENGINES:
+        _add(name, "motor de búsqueda", tmpl)
+
+    return targets
+
+
+def check_onion_health(max_targets: int = 40) -> List[Dict]:
+    """
+    Comprueba el estado de los .onion conocidos para AVISAR cuando rotan, cambian
+    o caen (las direcciones .onion son muy volátiles: incautaciones, rebrandings,
+    mirrors). Clasifica cada servicio:
+
+      · ok      → responde 200 con contenido real.
+      · blocked → responde pero con captcha/anti-bot (cambió de comportamiento).
+      · down    → no responde (probablemente rotó de dirección o fue incautado).
+
+    Cada entrada incluye un fingerprint ligero (título + tamaño) para que un
+    humano detecte cambios de contenido entre escaneos. Es diagnóstico: NO cuenta
+    como exposición ni sube el nivel de riesgo.
+    """
+    targets = _onion_targets_for_health()[:max_targets]
+    if not targets:
+        return []
+    from .darkweb_forums import _looks_blocked
+
+    def _probe(t):
+        servicio, categoria, base = t
+        ts = _tor_session(timeout=15)
+        r = request_with_retry(ts, base, timeout=15, retries=1,
+                               rotate_circuit_on_fail=True, accept_status=(200,))
+        if r is None:
+            return {"servicio": servicio, "categoria": categoria, "onion": base,
+                    "estado": "down", "titulo": "", "bytes": 0,
+                    "nota": "No responde: probablemente rotó de dirección o fue incautado."}
+        if _looks_blocked(r.text):
+            estado = "blocked"
+            nota = "Responde con captcha/anti-bot: cambió de comportamiento o exige login."
+        else:
+            estado, nota = "ok", "Operativo."
+        try:
+            soup = BeautifulSoup(r.text, "html.parser")
+            titulo = (soup.title.get_text(strip=True) if soup.title else "")[:80]
+        except Exception:  # noqa: BLE001
+            titulo = ""
+        return {"servicio": servicio, "categoria": categoria, "onion": base,
+                "estado": estado, "titulo": titulo, "bytes": len(r.text or ""),
+                "nota": nota}
+
+    resultados: List[Dict] = []
+    for _, res in run_parallel(_probe, targets, max_workers=8,
+                               label="onion_health", timeout=TOR_ENGINES_BUDGET_S):
+        if isinstance(res, dict):
+            resultados.append(res)
+
+    caidos = sum(1 for r in resultados if r["estado"] == "down")
+    bloqueados = sum(1 for r in resultados if r["estado"] == "blocked")
+    if caidos or bloqueados:
+        log.info("   [!] Salud .onion: %d caído(s), %d bloqueado(s) de %d vigilados "
+                 "→ revisa/actualiza darkweb_onions.json", caidos, bloqueados, len(resultados))
+    elif resultados:
+        log.info("   [+] Salud .onion: %d servicios operativos", len(resultados))
+    return resultados
 
 
 def search_terms_in_tor_engines(terms: List[str], max_terms: int = 5) -> List[Dict]:
@@ -1003,6 +1100,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
         "telegram_hits":      [],
         "intelx_hits":        [],
         "onion_seeds":        [],
+        "onion_health":       [],
         "nivel_riesgo":       "LOW",
         "total_hits":         0,
         "fuentes_activas":    [],
@@ -1026,6 +1124,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
     if use_tor:
         tasks["tor_engines"] = lambda: search_tor_engines(domain)
         tasks["onion_seeds"] = lambda: discover_onion_seeds()
+        tasks["onion_health"] = lambda: check_onion_health()
     if intelx_key:
         tasks["intelx"] = lambda: check_intelx_domain(domain, intelx_key)
 
@@ -1057,6 +1156,18 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
     summary["onion_seeds"] = seeds if isinstance(seeds, list) else []
     if summary["onion_seeds"]:
         summary["fuentes_activas"].append(f"onion_seeds ({len(summary['onion_seeds'])} .onion)")
+
+    # Salud de los .onion conocidos (rotación/caídas) — diagnóstico, NO exposición.
+    health = par.get("onion_health") or []
+    summary["onion_health"] = health if isinstance(health, list) else []
+    summary["onion_health_caidos"] = sum(
+        1 for h in summary["onion_health"] if isinstance(h, dict) and h.get("estado") == "down")
+    summary["onion_health_bloqueados"] = sum(
+        1 for h in summary["onion_health"] if isinstance(h, dict) and h.get("estado") == "blocked")
+    if summary["onion_health"]:
+        summary["fuentes_activas"].append(
+            f"onion_health ({len(summary['onion_health'])} vigilados, "
+            f"{summary['onion_health_caidos']} caídos)")
 
     # Foros (BreachForums + foros clearnet legacy + registro data-driven)
     bf_hits = par.get("breachforums") or []
