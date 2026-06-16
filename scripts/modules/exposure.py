@@ -86,7 +86,7 @@ def _tor_available() -> bool:
 class ExposureMonitor:
     def __init__(self, domain: str, emails: Optional[List[str]] = None,
                  run_tor: bool = False, threads: int = 10,
-                 use_browser: bool = False):
+                 use_browser: bool = False, use_pivot: bool = False):
         self.domain   = domain.lower().strip()
         # Los correos llegan auto-descubiertos desde Hunter (main.py).
         self.emails   = sorted({e.lower().strip() for e in (emails or []) if "@" in e})
@@ -95,6 +95,8 @@ class ExposureMonitor:
         # Renderizado con Firefox/Playwright (opcional, --browser). Solo se usa
         # como respaldo cuando una página depende de JavaScript.
         self.use_browser = use_browser
+        # Pivoting (opcional, --pivot): relanza la búsqueda con los IOCs hallados.
+        self.use_pivot = use_pivot
         self.session  = make_session()
         self.hibp_key       = os.getenv("HIBP_API_KEY", "")
         self.intelx_key     = os.getenv("INTELX_API_KEY", "")
@@ -930,5 +932,20 @@ class ExposureMonitor:
         except Exception as e:  # noqa: BLE001
             log.debug("IOC extractor: %s", e)
             result["iocs"] = {"iocs": {}, "counts": {}, "total": 0}
+
+        # ── Pivoting: relanzar la búsqueda con los IOCs descubiertos (opt-in) ──
+        if self.use_pivot:
+            try:
+                from .pivot import run_pivot
+                result["pivoting"] = run_pivot(
+                    self.domain, result, breaches=breaches,
+                    use_tor=self._tor_up,
+                )
+                summary["pivot_hits"] = result["pivoting"].get("total", 0)
+            except Exception as e:  # noqa: BLE001
+                log.debug("pivoting: %s", e)
+                result["pivoting"] = {"status": "error", "hits": [], "total": 0}
+        else:
+            result["pivoting"] = {"status": "desactivado", "hits": [], "total": 0}
 
         return result

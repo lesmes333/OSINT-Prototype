@@ -1217,11 +1217,58 @@ class ReportGenerator:
                     f"{tablas}"
                 )
 
+            # ── Pivoting (búsqueda relanzada con los IOCs encontrados) ────────
+            pivot_section = ""
+            pivot = dw.get('pivoting', {}) if isinstance(dw, dict) else {}
+            if isinstance(pivot, dict) and pivot.get('status') == 'success':
+                p_seeds = pivot.get('seeds', {})
+                p_hits = pivot.get('hits', [])
+                seed_chips = "".join(
+                    f"<span class='badge unk'>{escape(tipo)}: {len(p_seeds.get(tipo, []))}</span> "
+                    for tipo in ('emails', 'credenciales', 'dominios')
+                    if p_seeds.get(tipo)
+                )
+                hit_rows = "".join(
+                    f"<tr><td class='muted'>{escape(str(h.get('fuente') or h.get('foro', '')))}</td>"
+                    f"<td>{escape(str(h.get('variante') or h.get('termino', '')))}</td>"
+                    f"<td>{escape(str(h.get('extracto', ''))[:200])}</td></tr>"
+                    for h in p_hits[:30]
+                )
+                hit_table = (
+                    f"<table><thead><tr><th>Fuente</th><th>Semilla</th><th>Extracto</th></tr></thead>"
+                    f"<tbody>{hit_rows}</tbody></table>" if hit_rows else
+                    "<p class='muted'>Sin hits nuevos al pivotar sobre los IOCs.</p>"
+                )
+                pivot_section = (
+                    f"<h3>🔗 Pivoting sobre IOCs ({pivot.get('total', 0)} hit(s))</h3>"
+                    f"<p class='muted'>Búsqueda relanzada usando los IOCs hallados como nuevas "
+                    f"queries (profundidad 1). Validación manual recomendada.</p>"
+                    f"<p>{seed_chips}</p>{hit_table}"
+                )
+
+            # ── Semillas .onion descubiertas (directorios tipo tortaxi) ───────
+            seeds_section = ""
+            onion_seeds = ds_dw.get('onion_seeds', []) if isinstance(ds_dw, dict) else []
+            if onion_seeds:
+                seed_rows = "".join(
+                    f"<tr><td>{escape(str(s.get('onion', '')))}</td>"
+                    f"<td>{escape(str(s.get('titulo', '')))}</td>"
+                    f"<td class='muted'>{escape(str(s.get('fuente', '')))}</td></tr>"
+                    for s in onion_seeds[:60]
+                )
+                seeds_section = (
+                    f"<h3>🌱 Semillas .onion descubiertas ({len(onion_seeds)})</h3>"
+                    f"<p class='muted'>Servicios Tor encontrados en directorios (descubrimiento, "
+                    f"no son menciones del dominio).</p>"
+                    f"<table><thead><tr><th>.onion</th><th>Título</th><th>Fuente</th></tr></thead>"
+                    f"<tbody>{seed_rows}</tbody></table>"
+                )
+
             dw_section = (
                 f"<section><h2>🛡️ Exposición &amp; Dark Web</h2>"
                 f"{overview}"
                 f"{c1_section}{c2_section}{c3_section}{c4_section}{c6_section}{c5_section}"
-                f"{ioc_section}"
+                f"{ioc_section}{pivot_section}{seeds_section}"
                 f"</section>"
             )
 

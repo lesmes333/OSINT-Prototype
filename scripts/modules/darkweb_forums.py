@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 
 from .utils import get_logger
-from .tor_utils import tor_session, clearnet_session, request_with_retry
+from .tor_utils import tor_session, clearnet_session, request_with_retry, renew_tor_identity
 from .ioc_extractor import extract_iocs
 
 log = get_logger()
@@ -68,6 +68,24 @@ FORUM_REGISTRY: List[Dict] = [
         "content": "Discusiones estilo Reddit, leaks, market intel",
         "clearnet": "", "search_path": "/search?q={q}",
         "method": "discover", "requires_login": False, "cloudflare": False,
+    },
+    {
+        "key": "dkforest", "name": "Dark Forest (dkforest)", "lang": "en",
+        "content": "Foro/comunidad Tor: leaks, hacking, market intel",
+        "clearnet": "", "search_path": "/search?q={q}",
+        "method": "search", "requires_login": False, "cloudflare": False,
+    },
+    {
+        "key": "pitchprash", "name": "Pitch (foro)", "lang": "en",
+        "content": "Foro Tor de hacking/leaks",
+        "clearnet": "", "search_path": "/search?q={q}",
+        "method": "search", "requires_login": False, "cloudflare": False,
+    },
+    {
+        "key": "germania", "name": "Germania", "lang": "de/en",
+        "content": "Mercado/foro germano: datos, fraude, credenciales",
+        "clearnet": "", "search_path": "/search?q={q}",
+        "method": "discover", "requires_login": True, "cloudflare": False,
     },
     {
         "key": "xss", "name": "XSS.is", "lang": "ru/en",
@@ -221,15 +239,38 @@ def _extract_forum_hits(html: str, terms: List[str], forum: Dict,
     return hits
 
 
-def search_forum(forum: Dict, domain: str) -> List[Dict]:
+# Señales típicas de páginas anti-bot / captcha / rate-limit que devuelven 200
+# pero NO son contenido real. Muchos foros .onion las muestran tras varias
+# peticiones. Al detectarlas rotamos la identidad Tor (NEWNYM) y reintentamos.
+_BLOCK_SIGNS = (
+    "just a moment", "verify you are human", "captcha", "cloudflare",
+    "rate limit", "rate-limited", "too many requests", "access denied",
+    "ddos-guard", "checking your browser", "attention required",
+    "i am not a robot", "hcaptcha", "are you human",
+)
+
+
+def _looks_blocked(html: str) -> bool:
+    """Heurística: ¿la respuesta es una página de bloqueo/captcha en vez de contenido?"""
+    if not html:
+        return True
+    low = html[:5000].lower()
+    return any(s in low for s in _BLOCK_SIGNS)
+
+
+def search_forum(forum: Dict, domain: str, terms: Optional[List[str]] = None) -> List[Dict]:
     """
-    Busca el dominio en un foro concreto del registro.
+    Busca uno o varios términos en un foro concreto del registro.
 
     Prioriza la dirección .onion (si está configurada en darkweb_onions.json);
     si no, usa el mirror clearnet. Los foros method="discover" sin .onion
     configurada se omiten aquí (se cubren por descubrimiento en motores .onion).
+
+    :param terms: términos a buscar. Si es None, se usan las variantes del dominio.
+                  Permite reutilizar este buscador para PIVOTING (buscar un email,
+                  credencial o dominio relacionado encontrado en la 1ª pasada).
     """
-    terms = _domain_search_terms(domain)
+    terms = terms if terms else _domain_search_terms(domain)
     onion = forum.get("onion", "")
     clearnet = forum.get("clearnet", "")
 
@@ -243,25 +284,37 @@ def search_forum(forum: Dict, domain: str) -> List[Dict]:
     else:
         return []  # sin endpoint accesible → se descubre vía motores .onion
 
+    from urllib.parse import quote_plus
     for term in terms[:2]:
-        from urllib.parse import quote_plus
         url = base_url + forum["search_path"].format(q=quote_plus(term))
         r = request_with_retry(sess, url, timeout=25, retries=2,
                                rotate_circuit_on_fail=via_tor,
                                accept_status=(200,))
+        # Anti-bot: si vino una página de bloqueo/captcha (200 engañoso), rota
+        # identidad Tor (NEWNYM), abre una sesión nueva y reintenta una vez.
+        if via_tor and r is not None and _looks_blocked(r.text):
+            log.debug("   [!] %s: posible bloqueo anti-bot → rotando identidad Tor", forum["name"])
+            renew_tor_identity()
+            sess = tor_session(timeout=25)
+            r = request_with_retry(sess, url, timeout=25, retries=1,
+                                   rotate_circuit_on_fail=True, accept_status=(200,))
+            if r is not None and _looks_blocked(r.text):
+                continue  # sigue bloqueado: pasamos al siguiente término/foro
         if r is None:
             continue
         hits = _extract_forum_hits(r.text, [term], forum, url, via_tor, domain)
         if hits:
-            log.info("   [+] %s: %d menciones de %s", forum["name"], len(hits), domain)
+            log.info("   [+] %s: %d menciones de %s", forum["name"], len(hits), term)
             return hits
     return []
 
 
-def search_all_forums(domain: str, max_workers: int = 8) -> Dict:
+def search_all_forums(domain: str, max_workers: int = 8,
+                      terms: Optional[List[str]] = None) -> Dict:
     """
-    Busca el dominio en todos los foros del registro que tengan endpoint
-    accesible (.onion configurada o mirror clearnet con búsqueda).
+    Busca el dominio (o `terms` arbitrarios, para pivoting) en todos los foros
+    del registro que tengan endpoint accesible (.onion configurada o mirror
+    clearnet con búsqueda).
 
     Devuelve {hits, buscados, sin_endpoint} donde `sin_endpoint` lista los foros
     que requieren una dirección .onion en darkweb_onions.json para activarse.
@@ -279,7 +332,7 @@ def search_all_forums(domain: str, max_workers: int = 8) -> Dict:
              len(accesibles), len(sin_endpoint))
 
     all_hits: List[Dict] = []
-    for _, result in run_parallel(lambda f: search_forum(f, domain),
+    for _, result in run_parallel(lambda f: search_forum(f, domain, terms=terms),
                                   accesibles, max_workers=max_workers,
                                   label="forums"):
         if isinstance(result, list):

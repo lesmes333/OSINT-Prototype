@@ -329,6 +329,7 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 | `--darkweb / --no-darkweb` | Activa/desactiva la monitorización de exposición (brechas, Ahmia, pastes). |
 | `--tor` | Capa avanzada: crawling `.onion` vía Tor (requiere Tor en `:9050`). Desactivada por defecto. |
 | `--browser` | Renderiza páginas con JavaScript usando Firefox/Playwright (respaldo en dark web, p. ej. Telegram). Desactivado por defecto: consume RAM. Requiere `playwright install firefox`. |
+| `--pivot` | Pivoting: tras la dark web, relanza la búsqueda usando los IOCs encontrados (emails, credenciales y dominios/`.onion` relacionados) como nuevas queries en foros y motores `.onion`. Añade tiempo. |
 | `--no-active` | Omite la verificación ICMP/TCP. |
 | `--no-diff` | No compara con el escaneo anterior (desactiva la monitorización). |
 | `-t, --threads` | Hilos concurrentes (def: 30). |
@@ -349,6 +350,8 @@ python main.py ejemplo.com --all --formats json,html -o resultados
   | `TOR_ENGINES_BUDGET_S` | `90` | Solo los motores de búsqueda `.onion`. |
   | `BROWSER_MIN_RAM_MB` | `700` | Mínimo de RAM libre para arrancar Firefox (`--browser`). Si hay menos, no se lanza (protección anti-OOM). |
   | `BROWSER_PAGE_TIMEOUT` | `30` | Tiempo máximo por página renderizada. |
+  | `PIVOT_MAX_PER_TYPE` | `3` | Máx. semillas por tipo (email/credencial/dominio) al pivotar (`--pivot`). |
+  | `DARKWEB_ONIONS_FILE` | `darkweb_onions.json` | Ruta del fichero (gitignored) con las direcciones `.onion` verificadas de los foros. |
 
 > 💡 En máquinas con poca RAM y **sin swap**, usa `--browser` con moderación (idealmente sin `--fingerprint` a la vez). El navegador es un único Firefox headless reutilizado, con concurrencia 1 y bloqueo de imágenes/CSS para minimizar memoria.
 

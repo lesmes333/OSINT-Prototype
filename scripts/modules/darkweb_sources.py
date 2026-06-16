@@ -111,6 +111,13 @@ DARK_SOURCES = {
         "search": "/torch/search?query={q}&action=Search",
         "requires_login": False,
     },
+    "tor66": {
+        "url":   "http://tor66sewebgixwhcqfnp5inzp5x5uohhdy3kvtnyfxc2e5mxiuh34iid.onion",
+        "type":  "search",
+        "desc":  "Tor66 — motor de búsqueda .onion con ranking por relevancia",
+        "search": "/search?q={q}&sorttype=rel",
+        "requires_login": False,
+    },
     # ── Paste sites .onion ────────────────────────────────────────────────────
     "deepaste": {
         "url":   "http://depastedihrn3jtw.onion",
@@ -448,6 +455,7 @@ TOR_SEARCH_ENGINES = [
     ("Haystak",    "http://haystak5njsmn2hqkewecpaxetahtwhsbsa64jom2k22z5afxhnpxfid.onion/?q={q}"),
     ("Torch",      "http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rplyvk3noyd.onion/torch/search?query={q}&action=Search"),
     ("DarkSearch", "http://darksearcy3n4kxrkvdjfxxvj4ztafnlqrq2fv7cxwvdwvj2vcv4yd.onion/search?query={q}"),
+    ("Tor66",      "http://tor66sewebgixwhcqfnp5inzp5x5uohhdy3kvtnyfxc2e5mxiuh34iid.onion/search?q={q}&sorttype=rel"),
 ]
 
 
@@ -538,6 +546,82 @@ def search_tor_engines(domain: str) -> List[Dict]:
         if isinstance(result, list):
             all_hits.extend(result)
     return all_hits
+
+
+# ── Directorios .onion usados como SEMILLA de descubrimiento ──────────────────
+# No se buscan menciones del dominio aquí: se crawlea el directorio para sacar
+# direcciones .onion nuevas (amplía el universo de servicios Tor conocidos).
+ONION_SEED_DIRECTORIES = [
+    ("tortaxi", "http://tortaxi2dev6xjwbaydqzla77rrnth7yn2oqzjfmiuwn5h6vsk2a4syd.onion"),
+]
+# .onion v3: 56 chars en base32 (a-z y 2-7) + ".onion".
+_RE_ONION_ADDR = re.compile(r"\b([a-z2-7]{56})\.onion", re.IGNORECASE)
+
+
+def discover_onion_seeds(max_links: int = 60) -> List[Dict]:
+    """
+    Crawlea directorios .onion (tortaxi…) y extrae enlaces .onion para descubrir
+    servicios nuevos. Es un SEEDER, no una búsqueda por dominio: amplía cobertura
+    sin generar hits de exposición (no sube el nivel de riesgo).
+    """
+    seeds: List[Dict] = []
+    seen: set = set()
+    for nombre, base in ONION_SEED_DIRECTORIES:
+        try:
+            sess = _tu_tor_session(timeout=20)
+            r = request_with_retry(sess, base, timeout=20, retries=1,
+                                   rotate_circuit_on_fail=True, accept_status=(200,))
+            if r is None:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            for a in soup.find_all("a", href=True):
+                m = _RE_ONION_ADDR.search(a["href"])
+                if not m:
+                    continue
+                onion = m.group(0).lower()
+                if onion in seen:
+                    continue
+                seen.add(onion)
+                seeds.append({
+                    "onion":  onion,
+                    "titulo": re.sub(r"\s+", " ", a.get_text(" ", strip=True))[:80],
+                    "fuente": f"seed:{nombre}",
+                })
+                if len(seeds) >= max_links:
+                    break
+        except Exception as e:  # noqa: BLE001
+            log.debug("    [!] discover_onion_seeds %s: %s", nombre, e)
+    if seeds:
+        log.info("   [+] Semillas .onion descubiertas: %d (vía directorios)", len(seeds))
+    return seeds
+
+
+def search_terms_in_tor_engines(terms: List[str], max_terms: int = 5) -> List[Dict]:
+    """
+    Búsqueda LITERAL de términos arbitrarios (emails, credenciales, dominios
+    relacionados) en los motores .onion. La usa el PIVOTING para relanzar la
+    búsqueda con los IOCs descubiertos en la 1ª pasada. Cada (término × motor)
+    corre en su propio circuito Tor, en paralelo y con presupuesto de tiempo.
+    """
+    from urllib.parse import quote_plus
+    hits: List[Dict] = []
+
+    def _one(args):
+        term, (name, tmpl) = args
+        ts = _tu_tor_session(timeout=15)
+        url = tmpl.format(q=quote_plus(term))
+        r = request_with_retry(ts, url, timeout=15, retries=1,
+                               rotate_circuit_on_fail=True, accept_status=(200,))
+        if r is None:
+            return []
+        return _extract_hits(r.text, [term], f"pivot_tor:{name}", url, via_tor=True)
+
+    tareas = [(t, eng) for t in terms[:max_terms] for eng in TOR_SEARCH_ENGINES]
+    for _, res in run_parallel(_one, tareas, max_workers=8, label="pivot_tor",
+                               timeout=TOR_ENGINES_BUDGET_S):
+        if isinstance(res, list):
+            hits.extend(res)
+    return hits
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -918,6 +1002,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
         "paste_hits":         [],
         "telegram_hits":      [],
         "intelx_hits":        [],
+        "onion_seeds":        [],
         "nivel_riesgo":       "LOW",
         "total_hits":         0,
         "fuentes_activas":    [],
@@ -940,6 +1025,7 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
         tasks["leaksites"] = lambda: scan_all_ransomware_leaksites(domain, max_sites=80)
     if use_tor:
         tasks["tor_engines"] = lambda: search_tor_engines(domain)
+        tasks["onion_seeds"] = lambda: discover_onion_seeds()
     if intelx_key:
         tasks["intelx"] = lambda: check_intelx_domain(domain, intelx_key)
 
@@ -965,6 +1051,12 @@ def run_full_darkweb_scan(domain: str, intelx_key: str = "",
     summary["tor_search_hits"] = tor_hits if isinstance(tor_hits, list) else []
     if summary["tor_search_hits"]:
         summary["fuentes_activas"].append(f"tor_search ({len(summary['tor_search_hits'])} resultados)")
+
+    # Semillas .onion descubiertas (tortaxi…) — discovery, NO cuentan como exposición.
+    seeds = par.get("onion_seeds") or []
+    summary["onion_seeds"] = seeds if isinstance(seeds, list) else []
+    if summary["onion_seeds"]:
+        summary["fuentes_activas"].append(f"onion_seeds ({len(summary['onion_seeds'])} .onion)")
 
     # Foros (BreachForums + foros clearnet legacy + registro data-driven)
     bf_hits = par.get("breachforums") or []

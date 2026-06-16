@@ -61,6 +61,11 @@ def parse_args(argv=None):
         help="Renderizar páginas con JS usando Firefox/Playwright (respaldo en dark web). "
              "Desactivado por defecto: consume RAM. Requiere 'playwright install firefox'.",
     )
+    p.add_argument(
+        "--pivot", action="store_true",
+        help="Pivoting: tras la dark web, relanza la búsqueda con los IOCs encontrados "
+             "(emails, credenciales, dominios/.onion relacionados). Añade tiempo.",
+    )
     p.add_argument("--no-active", action="store_true", help="Omitir verificación ICMP/TCP de hosts.")
     p.add_argument("--no-diff", action="store_true", help="No comparar con el escaneo anterior (modo monitorización).")
     p.add_argument("--all", action="store_true", help="Ejecutar todas las fases (fingerprint + darkweb).")
@@ -217,7 +222,7 @@ def analyze_domain(domain, args, do_fp, do_dw):
         try:
             dw = ExposureMonitor(
                 domain, emails=emails, run_tor=args.tor, threads=args.threads,
-                use_browser=args.browser
+                use_browser=args.browser, use_pivot=args.pivot
             ).run_all()
             # Exportar IOCs detectados (emails, credenciales, IPs, hashes, cripto…)
             ioc_result = dw.get("iocs", {})

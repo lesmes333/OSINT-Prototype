@@ -3,6 +3,9 @@
 
   "darkforums":    { "onion": "", "clearnet": "" },
   "dread":         { "onion": "" },
+  "dkforest":      { "onion": "" },
+  "pitchprash":    { "onion": "" },
+  "germania":      { "onion": "" },
   "xss":           { "onion": "", "clearnet": "https://xss.is" },
   "exploit":       { "onion": "", "clearnet": "https://exploit.in" },
   "breachforums":  { "onion": "" },
