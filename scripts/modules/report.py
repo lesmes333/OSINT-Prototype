@@ -90,6 +90,16 @@ a.card .lbl::after{{content:" ↗";opacity:.55;font-size:10px}}
 .gtoolbar{{display:flex;gap:6px;margin:10px 0 4px;flex-wrap:wrap}}
 .gtoolbar button{{background:var(--panel2);color:var(--txt);border:1px solid var(--border);border-radius:7px;padding:5px 11px;font-size:13px;cursor:pointer;font-family:inherit}}
 .gtoolbar button:hover{{border-color:var(--accent);color:var(--accent)}}
+.gsearch{{width:100%;max-width:360px;background:var(--panel2);color:var(--txt);border:1px solid var(--border);border-radius:7px;padding:7px 11px;font-size:13px;font-family:inherit;margin:8px 0 0}}
+.gsearch:focus{{outline:none;border-color:var(--accent)}}
+.summary .exec{{list-style:none;margin:0;padding:0;display:grid;gap:8px}}
+.summary .exec li{{background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--muted);border-radius:8px;padding:10px 14px;font-size:14px}}
+.summary .exec li.crit{{border-left-color:#f85149}}
+.summary .exec li.high{{border-left-color:#db6d28}}
+.summary .exec li.warn{{border-left-color:#d4a72c}}
+.summary .exec li.ok{{border-left-color:#3fb950}}
+.summary .exec li b{{color:var(--txt)}}
+.summary .exec a{{color:var(--accent)}}
 </style></head>
 <body><div class="wrap">
 <header>
@@ -98,6 +108,7 @@ a.card .lbl::after{{content:" ↗";opacity:.55;font-size:10px}}
   <div class="meta">🎯 <b>{domain}</b> &nbsp;·&nbsp; 📡 IP: <b>{ip}</b> &nbsp;·&nbsp; 🕐 {ts}</div>
 </header>
 <div class="cards">{cards}</div>
+{summary}
 {alert}
 {diag}
 <section id="sub"><h2>🌐 Subdominios ({sub_total})</h2>
@@ -915,6 +926,72 @@ class ReportGenerator:
                             for a in diag['keys_to_fix'])
             alert_html = f'<div class="alert"><h3>🔑 Acción requerida: claves a renovar/actualizar en <code>.env</code></h3><ul>{items}</ul></div>'
 
+        # ---- Resumen ejecutivo ----
+        # Destaca de un vistazo lo accionable: vulnerabilidades graves, claves a
+        # renovar, novedades desde el último escaneo y exposición. Cada punto
+        # enlaza a su sección. Si no hay nada reseñable, lo dice claramente.
+        sev_count = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for _tech in vuln.get('results', []) if isinstance(vuln, dict) else []:
+            for _cve in _tech.get('cves', []):
+                _s = (_cve.get('severity') or 'UNKNOWN').upper()
+                if _s in sev_count:
+                    sev_count[_s] += 1
+        n_exploits = vuln.get('total_exploits', 0) if vuln.get('status') == 'success' else 0
+        n_keys = len(diag.get('keys_to_fix', []) or [])
+        ent_stats = ent_main.get('stats', {}) if isinstance((ent_main := threat_data.get('entities', {})), dict) else {}
+        n_new_ent = ent_stats.get('new_entities', 0)
+        n_links = dw.get('total_links_found', 0) if dw.get('status') == 'success' else 0
+        dw_mentions = dw.get('total_mentions', 0) if dw.get('status') == 'success' else 0
+        n_active = activos.get('activos', 0) if activos else 0
+        _hunter = threat_data.get('hunter', {}) if isinstance(threat_data.get('hunter'), dict) else {}
+        n_emails = _hunter.get('total_emails', 0)
+
+        exec_items = []
+        crit_high = sev_count["CRITICAL"] + sev_count["HIGH"]
+        if crit_high:
+            expl = f" · <b>{n_exploits}</b> con exploit público conocido" if n_exploits else ""
+            exec_items.append(("crit",
+                f"🔴 <b>{crit_high}</b> vulnerabilidad(es) crítica(s)/alta(s) "
+                f"({sev_count['CRITICAL']} críticas, {sev_count['HIGH']} altas){expl}. "
+                f"<a href='#cve'>Ver detalle →</a>"))
+        if n_keys:
+            exec_items.append(("high",
+                f"🔑 <b>{n_keys}</b> clave(s) de API a renovar/actualizar en <code>.env</code>. "
+                f"<a href='#diag'>Ver diagnóstico →</a>"))
+        if n_links or dw_mentions:
+            partes = []
+            if n_links:
+                partes.append(f"<b>{n_links}</b> enlace(s) .onion")
+            if dw_mentions:
+                partes.append(f"<b>{dw_mentions}</b> mención(es)")
+            exec_items.append(("warn",
+                f"🧅 Exposición en dark web: {' y '.join(partes)} relacionadas con el dominio. "
+                f"<a href='#darkweb'>Ver dark web →</a>"))
+        if n_new_ent:
+            exec_items.append(("ok",
+                f"🆕 <b>{n_new_ent}</b> entidad(es) nueva(s) desde el último escaneo. "
+                f"<a href='#entidades'>Ver entidades →</a>"))
+        # Contexto siempre útil (sin severidad): superficie descubierta.
+        ctx = (f"🌐 <b>{discovery_data.get('total_subdomains', 0)}</b> subdominios "
+               f"(<b>{n_active}</b> activos)")
+        if fp.get('status') == 'success' and fp.get('total_technologies'):
+            ctx += f" · 🧬 <b>{fp.get('total_technologies')}</b> tecnologías"
+        if n_emails:
+            ctx += f" · 📧 <b>{n_emails}</b> email(s) públicos"
+        exec_items.append(("", ctx + "."))
+
+        if not (crit_high or n_keys or n_links or dw_mentions):
+            exec_items.insert(0, ("ok",
+                "✅ Sin vulnerabilidades graves, claves caducadas ni exposición en dark web "
+                "detectadas en este escaneo."))
+
+        summary_html = (
+            "<section id='resumen' class='summary'><h2>📋 Resumen ejecutivo</h2>"
+            "<ul class='exec'>"
+            + "".join(f"<li class='{kind}'>{txt}</li>" for kind, txt in exec_items)
+            + "</ul></section>"
+        )
+
         # ---- Diagnóstico APIs ----
         api_status_badge = {
             "ok": ("OK", "low"), "no_api_key": ("sin clave", "unk"),
@@ -1474,6 +1551,8 @@ class ReportGenerator:
                              f"{e.get('grade','?')} · {e.get('n_sources',0)} fuente(s)",
                     "color": _gcolor.get(e.get('grade'), "#8b949e"),
                     "group": e.get('type', ''),
+                    # Texto completo (sin truncar) para el buscador del grafo.
+                    "search": f"{e.get('type','')} {e.get('value','')}".lower(),
                 })
             edges_g = []
             for r in ent.get('relations', []) or []:
@@ -1502,10 +1581,15 @@ class ReportGenerator:
                     "<span style='color:#8b949e'>■</span> D (inferencia). "
                     "Pasa el ratón por un punto para ver el detalle.<br>"
                     "🖱️ <b>Cómo moverse:</b> <b>arrastra</b> un punto para moverlo, "
-                    "arrastra el fondo para desplazarte, y usa los botones "
-                    "<b>＋ / −</b> de aquí abajo para acercar/alejar "
-                    "(así no se mueve la página al hacer scroll).</div>"
+                    "arrastra el fondo para desplazarte y haz <b>pellizco (pinch) "
+                    "en el trackpad</b> o <b>Ctrl/⌘ + scroll</b> sobre el grafo para "
+                    "acercar/alejar (el scroll normal sigue moviendo la página). "
+                    "También tienes los botones <b>＋ / −</b> de aquí abajo. "
+                    "<b>Haz clic</b> en un punto para resaltar solo sus conexiones.</div>"
                     f"<p class='muted'>{cap_txt.strip() or 'Grafo interactivo de entidades.'}</p>"
+                    "<input id='entgraph_q' class='gsearch' type='search' "
+                    "autocomplete='off' placeholder='🔎 Buscar entidad (subdominio, IP, email, tecnología…)' "
+                    "oninput='entgraphSearch(this.value)'>"
                     "<div class='gtoolbar'>"
                     "<button type='button' onclick='entgraphZoom(1.3)'>＋ Acercar</button>"
                     "<button type='button' onclick='entgraphZoom(0.77)'>− Alejar</button>"
@@ -1522,19 +1606,66 @@ class ReportGenerator:
                     "return;}c.innerHTML='';"
                     f"var nodes=new vis.DataSet({nodes_json});"
                     f"var edges=new vis.DataSet({edges_json});"
+                    # Copia de los datos originales para poder restaurar colores
+                    # tras resaltar las conexiones de un nodo.
+                    "var baseNodes=nodes.get();var baseEdges=edges.get();"
+                    "var EDGE_ON={color:'#2d3543',highlight:'#58a6ff'};"
                     "var net=new vis.Network(c,{nodes:nodes,edges:edges},{"
                     "nodes:{shape:'dot',size:12,font:{color:'#e6edf3',size:12}},"
-                    "edges:{color:{color:'#2d3543',highlight:'#58a6ff'},"
+                    "edges:{color:EDGE_ON,"
                     "font:{color:'#8b949e',size:10,strokeWidth:0},smooth:false},"
                     "physics:{stabilization:true,barnesHut:{gravitationalConstant:-8000,"
                     "springLength:120}},"
-                    # dragNodes/dragView ON, zoomView OFF: en Mac el scroll de la rueda
-                    # o el trackpad NO secuestra la página; el zoom va por los botones.
+                    # dragNodes/dragView ON; zoomView OFF para no secuestrar el scroll
+                    # de la página. El zoom va por pinch (Ctrl/⌘+wheel) y por botones.
                     "interaction:{hover:true,tooltipDelay:120,dragNodes:true,"
                     "dragView:true,zoomView:false}});"
                     "net.once('stabilizationIterationsDone',function(){net.fit();});"
-                    "window.entgraphZoom=function(f){net.moveTo({scale:net.getScale()*f});};"
-                    "window.entgraphFit=function(){net.fit({animation:true});};"
+                    # Zoom anclado al cursor: el punto bajo el puntero se queda fijo.
+                    "function zoomAt(p,f){var b=net.DOMtoCanvas(p);"
+                    "var s=Math.min(Math.max(net.getScale()*f,0.15),5);"
+                    "net.moveTo({scale:s});var a=net.DOMtoCanvas(p);"
+                    "var v=net.getViewPosition();"
+                    "net.moveTo({scale:s,position:{x:v.x+(b.x-a.x),y:v.y+(b.y-a.y)}});}"
+                    # Pinch del trackpad (y Ctrl/⌘+rueda) llegan como 'wheel' con
+                    # ctrlKey/metaKey=true. Solo entonces hacemos zoom y bloqueamos
+                    # el scroll; el scroll de dos dedos normal mueve la página.
+                    "c.addEventListener('wheel',function(e){"
+                    "if(e.ctrlKey||e.metaKey){e.preventDefault();"
+                    "var r=c.getBoundingClientRect();"
+                    "zoomAt({x:e.clientX-r.left,y:e.clientY-r.top},e.deltaY<0?1.12:0.892);}"
+                    "},{passive:false});"
+                    # Clic en un nodo: resalta él y sus vecinos, atenúa el resto.
+                    "function restore(){nodes.update(baseNodes.map(function(n){"
+                    "return{id:n.id,color:n.color};}));"
+                    "edges.update(baseEdges.map(function(ed){"
+                    "return{id:ed.id,color:EDGE_ON};}));}"
+                    "net.on('selectNode',function(p){var sel=p.nodes[0];"
+                    "var keep=net.getConnectedNodes(sel);keep.push(sel);"
+                    "var ke=net.getConnectedEdges(sel);"
+                    "nodes.update(baseNodes.map(function(n){return{id:n.id,"
+                    "color:keep.indexOf(n.id)>=0?n.color:'rgba(139,148,158,0.12)'};}));"
+                    "edges.update(baseEdges.map(function(ed){return{id:ed.id,"
+                    "color:ke.indexOf(ed.id)>=0?{color:'#58a6ff'}:"
+                    "{color:'rgba(45,53,67,0.18)'}};}));});"
+                    "net.on('deselectNode',restore);"
+                    # Buscador: resalta las entidades que coinciden y atenúa el resto,
+                    # encuadrando el grafo sobre los aciertos. Sin texto, restaura todo.
+                    "window.entgraphSearch=function(q){q=(q||'').trim().toLowerCase();"
+                    "if(!q){restore();return;}"
+                    "var on={},hit=[];baseNodes.forEach(function(n){"
+                    "if((n.search||String(n.label).toLowerCase()).indexOf(q)>=0){on[n.id]=1;hit.push(n.id);}});"
+                    "nodes.update(baseNodes.map(function(n){return{id:n.id,"
+                    "color:on[n.id]?n.color:'rgba(139,148,158,0.10)'};}));"
+                    "edges.update(baseEdges.map(function(ed){return{id:ed.id,"
+                    "color:(on[ed.from]&&on[ed.to])?{color:'#58a6ff'}:"
+                    "{color:'rgba(45,53,67,0.12)'}};}));"
+                    "if(hit.length){net.selectNodes(hit);"
+                    "net.fit({nodes:hit,animation:true});}};"
+                    "window.entgraphZoom=function(f){var r=c.getBoundingClientRect();"
+                    "zoomAt({x:r.width/2,y:r.height/2},f);};"
+                    "window.entgraphFit=function(){var q=document.getElementById('entgraph_q');"
+                    "if(q)q.value='';restore();net.unselectAll();net.fit({animation:true});};"
                     "})();</script>"
                 )
 
@@ -1646,6 +1777,7 @@ class ReportGenerator:
             ip=escape(str(threat_data.get('ip_address', 'N/D'))),
             ts=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             cards=cards_html,
+            summary=summary_html,
             alert=alert_html,
             diag=diag_html,
             sub_rows=sub_rows or "<tr><td colspan=4 class='muted'>Sin subdominios</td></tr>",
