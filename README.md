@@ -42,7 +42,7 @@ Detecta exposición del dominio en fuentes públicas, deep web y dark web **lega
 
 | Capa | Qué busca | Fuentes | Requiere |
 |------|-----------|---------|----------|
-| **1. Brechas de datos** | Correos y credenciales del dominio en filtraciones conocidas | XposedOrNot (gratis) · HIBP · **LeakCheck** (gratis 5/día) · **Dehashed** | — / `HIBP_API_KEY` / `LEAKCHECK_API_KEY` / `DEHASHED_*` |
+| **1. Brechas de datos** | Correos y credenciales del dominio en filtraciones conocidas | XposedOrNot (gratis) · HIBP · **LeakCheck** (de pago, API v2) · **Dehashed** | — / `HIBP_API_KEY` / `LEAKCHECK_API_KEY` / `DEHASHED_*` |
 | **2. Índice dark web** | Menciones del dominio en motores .onion | **Ahmia .onion · OnionLand · DarkSearch · Haystak** (todos vía Tor) · IntelX (pago) | `--tor` + Tor en `:9050` / `INTELX_API_KEY` |
 | **3. Leaks en fuentes abiertas** | Historial público + repos + Pastebin | URLScan · GitHub · **Pastebin/archive vía Tor** (gratis) · Pastebin Pro · IntelX | `URLSCAN_API_KEY`, `GITHUB_TOKEN`, `PASTEBIN_API_KEY`* |
 | **4. Ransomware & Ciberataques** | Si el dominio aparece en leak sites de grupos de ransomware activos + reputación de dominio | **ransomware.live · RansomLook · Maltiverse** (todos gratis, sin clave) | — |
@@ -77,8 +77,8 @@ Todo el texto recolectado en la dark web (foros, leak sites, paste sites, canale
 
 Los IOCs se incluyen en el informe JSON y, además, se exportan a archivos propios listos para ingerir en un **SIEM/TIP**:
 
-- `iocs_<dominio>_<fecha>.json` — estructurado, con conteo por tipo.
-- `iocs_<dominio>_<fecha>.csv` — una fila por IOC (`tipo,valor`).
+- `<dominio>_iocs_<dd-mm-aaaa_HHhMM>.json` — estructurado, con conteo por tipo.
+- `<dominio>_iocs_<dd-mm-aaaa_HHhMM>.csv` — una fila por IOC (`tipo,valor`).
 
 > Los regex están validados (p. ej. las IPv6 se confirman con `ipaddress`, no por regex puro) y filtran falsos positivos comunes (fragmentos de email, nombres de fichero `.txt`/`.sql`, etc.).
 
@@ -95,7 +95,7 @@ Cada entidad acumula **sus fuentes** y de ahí sale un **grado de confianza** se
 | **C** 🟠 | Una sola fuente media (un foro/paste) |
 | **D** ⚪ | Inferencia (una fuente débil: buscador `.onion`/pivoting por subcadena) |
 
-La **fiabilidad de la fuente** se pondera (CTI curada y registros DNS/WHOIS = `trusted`; foros/markets/pastes = `mixed`; buscadores `.onion`/pivoting = `unknown`), así un email visto en una brecha verificada **Y** en un foro **Y** por pivoting sube a grado A, mientras que una coincidencia por subcadena en un buscador se queda en D. El grafo aparece en el informe HTML y Markdown (sección *Entidades correlacionadas*) y completo en el JSON. Es la base para el timeline y la visualización de grafo previstos.
+La **fiabilidad de la fuente** se pondera (CTI curada y registros DNS/WHOIS = `trusted`; foros/markets/pastes = `mixed`; buscadores `.onion`/pivoting = `unknown`), así un email visto en una brecha verificada **Y** en un foro **Y** por pivoting sube a grado A, mientras que una coincidencia por subcadena en un buscador se queda en D. El grafo aparece como tabla en el informe HTML y Markdown (sección *Entidades correlacionadas*) y completo en el JSON. Además, el informe **HTML incluye un grafo visual interactivo** (vis-network): nodos = entidades coloreadas por grado de confianza (🟢 A · 🔵 B · 🟠 C · ⚪ D), aristas = relaciones; se arrastra y se hace zoom. Si no hay conexión para cargar la librería, muestra un aviso y queda la tabla con los mismos datos.
 
 ### 🌐 Búsqueda agresiva y multilingüe
 
@@ -379,7 +379,7 @@ python main.py ejemplo.com --all --formats json,html -o resultados
 
 ### 🔁 Modo monitorización (diff entre escaneos)
 
-Cada vez que analizas un dominio, la herramienta **compara automáticamente** con el escaneo anterior del mismo dominio (busca el `activos_<dominio>_*.json` previo en la carpeta de salida) y resalta:
+Cada vez que analizas un dominio, la herramienta **compara automáticamente** con el escaneo anterior del mismo dominio (busca el JSON de activos más reciente del dominio en `outputs/`, recorriendo las subcarpetas de cada escaneo y eligiéndolo por fecha de modificación) y resalta:
 
 - 🆕 **Subdominios nuevos** y ➖ **desaparecidos**
 - 🔴 **CVEs nuevos**
@@ -397,16 +397,18 @@ Como conserva todos los JSON con fecha, cada ejecución se compara con la anteri
 
 ## 📄 Informes generados
 
-Por cada dominio, en `outputs/` (o la carpeta indicada con `-o`):
+Cada escaneo crea **su propia subcarpeta** dentro de `outputs/` (o la carpeta indicada con `-o`), con la fecha en formato europeo: `outputs/<dominio>_<dd-mm-aaaa_HHhMM>/`. Dentro, los archivos llevan el dominio primero para identificarlos de un vistazo:
 
 | Archivo | Contenido |
 |---------|-----------|
-| `informe_<dominio>_<fecha>.html` | **Informe visual** (abrir en navegador): resumen, diagnóstico, subdominios, DNS, WHOIS, tecnologías, CVEs con severidad y enlaces INCIBE-CERT, dark web. |
-| `informe_<dominio>_<fecha>.md` | Mismo contenido en Markdown (para GitHub/lectura rápida). |
-| `activos_<dominio>_<fecha>.json` | Datos completos y estructurados (para automatización). |
-| `subdominios_<dominio>_<fecha>.csv` | Lista de subdominios con su(s) fuente(s). |
-| `iocs_<dominio>_<fecha>.json` | **IOCs** extraídos de la dark web (emails, credenciales, IPs, hashes, wallets, onions) con conteo por tipo. Solo si se detecta alguno. |
-| `iocs_<dominio>_<fecha>.csv` | Mismos IOCs, una fila por indicador (`tipo,valor`) — listo para SIEM/TIP. |
+| `<dominio>_informe_<dd-mm-aaaa_HHhMM>.html` | **Informe visual** (abrir en navegador): resumen, diagnóstico, subdominios, DNS, WHOIS, tecnologías, CVEs con severidad y enlaces INCIBE-CERT, dark web y **grafo de entidades interactivo**. |
+| `<dominio>_informe_<dd-mm-aaaa_HHhMM>.md` | Mismo contenido en Markdown (para GitHub/lectura rápida). |
+| `<dominio>_activos_<dd-mm-aaaa_HHhMM>.json` | Datos completos y estructurados (para automatización). |
+| `<dominio>_subdominios_<dd-mm-aaaa_HHhMM>.csv` | Lista de subdominios con su(s) fuente(s). |
+| `<dominio>_iocs_<dd-mm-aaaa_HHhMM>.json` | **IOCs** extraídos de la dark web (emails, credenciales, IPs, hashes, wallets, onions) con conteo por tipo. Solo si se detecta alguno. |
+| `<dominio>_iocs_<dd-mm-aaaa_HHhMM>.csv` | Mismos IOCs, una fila por indicador (`tipo,valor`) — listo para SIEM/TIP. |
+
+> `intel.db` (memoria entre escaneos) y los logs se guardan en la raíz de `outputs/`, ya que son acumulativos y no pertenecen a un escaneo concreto.
 
 ---
 
@@ -429,7 +431,6 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | NVD | `NVD_API_KEY` | https://nvd.nist.gov/developers/request-an-api-key |
 | GitHub | `GITHUB_TOKEN` | https://github.com/settings/tokens (scope: `public_repo`) |
 | GitLab | `GITLAB_TOKEN` | https://gitlab.com/-/profile/personal_access_tokens |
-| **LeakCheck** | `LEAKCHECK_API_KEY` | https://leakcheck.io → Registro gratuito → perfil → API (5 búsquedas/día gratis) |
 
 **Claves opcionales de pago** (amplían la Fase 4 — monitorización de exposición):
 
@@ -439,6 +440,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | **Intelligence X** | `INTELX_API_KEY` | desde ~1800 USD/año | Búsqueda en dark web, paste sites históricos, buckets S3 expuestos, foros de hacking. El plan gratuito Open Source **no incluye** acceso API. Obtener en: https://intelx.io/product |
 | **Have I Been Pwned** | `HIBP_API_KEY` | desde ~3.50 USD/mes | Brechas de datos por email (enriquece XposedOrNot, que es gratis). Obtener en: https://haveibeenpwned.com/API/Key |
 | **Dehashed** | `DEHASHED_EMAIL` + `DEHASHED_API_KEY` | $5.49/mes | La BD de credenciales filtradas más grande (~15B registros). Búsqueda por dominio devuelve emails, usuarios, contraseñas, IPs y nombres reales. Obtener en: https://dehashed.com/profile |
+| **LeakCheck** | `LEAKCHECK_API_KEY` | plan de pago | Credenciales filtradas por dominio. ⚠️ El registro es gratuito y da una clave válida, **pero la búsqueda por dominio de la API v2 requiere plan de pago** (responde 403 `Active plan required` sin él). Obtener en: https://leakcheck.io |
 
 > ℹ️ **Nota sobre Censys (nuevo Platform API):** la herramienta usa el **Censys Platform** (https://platform.censys.io):
 > - `CENSYS_PAT` → tu **Personal Access Token** (icono de usuario → *API Access* → *Create New Token*; la cadena larga se muestra **solo al crearlo**).
@@ -464,7 +466,7 @@ Copia `.env.example` a `.env` y rellena las que tengas. Si una clave caduca o ag
 | IntelX devuelve 403 | El plan "Open Source Intelligence" gratuito **no incluye acceso API** (`/intelligent/search` devuelve 403). Se necesita un plan de pago. |
 | Pastebin sin resultados con Pro key | Verifica que la IP está en la whitelist de tu cuenta Pro. Sin key, se usa el archivo público vía Tor (alternativa gratuita). |
 | Censys devuelve 403 | El Free Tier de Censys **no permite el endpoint de búsqueda vía API** (solo UI web). El escaneo continúa con las demás fuentes. |
-| LeakCheck 403 | Límite diario alcanzado (5 búsquedas/día en plan gratuito). Se resetea cada 24h. |
+| LeakCheck 403 (`Active plan required`) | La búsqueda por dominio de la API v2 **requiere plan de pago**; el registro gratuito no lo cubre. La herramienta lo detecta y continúa sin esta fuente. |
 | `playwright install chromium` falla | En VMs con red restringida, el CDN de Chromium puede estar bloqueado. Usa `playwright install firefox` en su lugar. |
 
 ---
