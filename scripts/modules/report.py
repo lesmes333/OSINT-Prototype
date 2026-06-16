@@ -785,12 +785,16 @@ class ReportGenerator:
                            f"({st.get('relations', 0)} relaciones detectadas).\n\n")
             md_content += "**Confianza:** " + " · ".join(
                 f"{_glabel[g]}: {bg.get(g, 0)}" for g in ('A', 'B', 'C', 'D') if bg.get(g)) + "\n\n"
-            md_content += "| Tipo | Valor | Confianza | #Fuentes | Fuentes |\n"
-            md_content += "|------|-------|-----------|----------|--------|\n"
+            if 'new_entities' in st or 'seen_before' in st:
+                md_content += (f"**Memoria entre escaneos:** 🆕 nuevas: {st.get('new_entities', 0)} · "
+                               f"↻ ya conocidas: {st.get('seen_before', 0)}\n\n")
+            md_content += "| Tipo | Valor | Confianza | Visto | #Fuentes | Fuentes |\n"
+            md_content += "|------|-------|-----------|-------|----------|--------|\n"
             for e in ent['entities'][:80]:
                 fuentes = ', '.join(e.get('sources', []))[:90]
+                visto = "🆕 nuevo" if e.get('is_new') else (str(e.get('first_seen', ''))[:10] or '—')
                 md_content += (f"| {e.get('type','')} | `{str(e.get('value',''))[:70]}` | "
-                               f"{e.get('grade','')} | {e.get('n_sources',0)} | {fuentes} |\n")
+                               f"{e.get('grade','')} | {visto} | {e.get('n_sources',0)} | {fuentes} |\n")
             if st.get('total', 0) > 80:
                 md_content += f"\n> Mostrando 80 de {st.get('total', 0)} entidades (por confianza). Todas en el JSON.\n"
             md_content += "\n"
@@ -1377,15 +1381,32 @@ class ReportGenerator:
                 f"<span class='badge unk'>{escape(t)}: {n}</span> "
                 for t, n in sorted(bt.items(), key=lambda x: -x[1])
             )
+            def _visto(e):
+                # 🆕 si es nueva en este escaneo; si no, desde cuándo se conoce.
+                if e.get('is_new'):
+                    return "<span class='badge low'>🆕 nuevo</span>"
+                fs = escape(str(e.get('first_seen', ''))[:10])
+                runs = e.get('runs', 0)
+                run_txt = f" ·{runs}×" if runs else ""
+                return f"<span class='muted'>{fs}{run_txt}</span>" if fs else "<span class='muted'>—</span>"
+
             ent_rows = "".join(
                 f"<tr><td class='muted'>{escape(str(e.get('type', '')))}</td>"
                 f"<td>{escape(str(e.get('value', ''))[:90])}</td>"
                 f"<td><span class='badge {_gbadge.get(e.get('grade'), 'unk')}'>"
                 f"{escape(str(e.get('grade', '')))}</span></td>"
+                f"<td>{_visto(e)}</td>"
                 f"<td class='muted'>{e.get('n_sources', 0)}</td>"
                 f"<td class='muted'>{escape(', '.join(e.get('sources', []))[:120])}</td></tr>"
                 for e in ent['entities'][:120]
             )
+            # Chip de memoria entre escaneos (solo si intel.db enriqueció el grafo).
+            mem_chip = ""
+            if 'new_entities' in st or 'seen_before' in st:
+                mem_chip = (
+                    f"<p><span class='badge low'>🆕 nuevas: {st.get('new_entities', 0)}</span> "
+                    f"<span class='badge unk'>↻ ya conocidas: {st.get('seen_before', 0)}</span></p>"
+                )
             extra = ""
             if st.get('total', 0) > 120:
                 extra = (f"<p class='muted'>Mostrando 120 de {st.get('total', 0)} entidades "
@@ -1395,9 +1416,9 @@ class ReportGenerator:
                 f"<p class='muted'>Todo lo hallado, normalizado a entidades con un "
                 f"<b>grado de confianza</b> según cuántas fuentes (y de qué fiabilidad) lo "
                 f"corroboran. {st.get('relations', 0)} relaciones detectadas.</p>"
-                f"<p>{grade_chips}</p><p>{type_chips}</p>"
+                f"<p>{grade_chips}</p><p>{type_chips}</p>{mem_chip}"
                 f"<table><thead><tr><th>Tipo</th><th>Valor</th><th>Confianza</th>"
-                f"<th>#Fuentes</th><th>Fuentes</th></tr></thead>"
+                f"<th>Visto</th><th>#Fuentes</th><th>Fuentes</th></tr></thead>"
                 f"<tbody>{ent_rows}</tbody></table>{extra}"
             )
 

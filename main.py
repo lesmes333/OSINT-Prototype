@@ -184,7 +184,15 @@ def analyze_domain(domain, args, do_fp, do_dw):
         from scripts.modules.cve_exploit import CveExploitScanner
 
         out: dict = {}
-        urls = [f"https://{s}" for s in discovery_results["subdomains"] if not s.startswith("*.")]
+        # El apex (p.ej. zunder.com) suele ser el sitio más rico en tecnologías y
+        # versiones (WordPress, plugins…), clave para la fase CVE. Va primero y se
+        # deduplica por si descovery ya lo incluyó como "subdominio".
+        hosts = [domain] + [s for s in discovery_results["subdomains"] if not s.startswith("*.")]
+        seen, urls = set(), []
+        for h in hosts:
+            if h not in seen:
+                seen.add(h)
+                urls.append(f"https://{h}")
         urls = urls[: args.max_fp_urls]
         try:
             fp = Fingerprinter(threads=max(2, args.threads // 8))
@@ -294,10 +302,14 @@ def analyze_domain(domain, args, do_fp, do_dw):
         ui.table_changes(changes)
 
     # --- CORRELACIÓN: grafo de entidades + confidence scoring ---
+    run_ts = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         from scripts.modules.entities import build_entity_graph
-        threat_results["entities"] = build_entity_graph(
-            domain, discovery_results, threat_results)
+        graph = build_entity_graph(domain, discovery_results, threat_results)
+        # Persistencia: fusiona con el histórico (intel.db) y anota first_seen/
+        # last_seen/is_new/runs. Memoria entre escaneos; degrada con elegancia.
+        from scripts.modules.intel_store import persist_and_enrich
+        threat_results["entities"] = persist_and_enrich(graph, args.output_dir, run_ts)
     except Exception as e:  # noqa: BLE001
         threat_results["entities"] = {"status": "error", "message": str(e)}
 
@@ -313,7 +325,7 @@ def analyze_domain(domain, args, do_fp, do_dw):
                 "threat_intel": threat_results,
                 "diagnostics": diag,
                 "changes_since_last_scan": changes,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": run_ts,
             }
         )
     if "csv" in formats:
