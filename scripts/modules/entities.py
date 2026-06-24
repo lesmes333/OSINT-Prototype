@@ -46,6 +46,7 @@ _TIER_TRUSTED = (
     "wayback", "urlscan", "ransomware.live", "ransomware_live", "ransomlook",
     "hudson", "pulsedive", "maltiverse", "hibp", "xposedornot", "xposed",
     "hunter", "github", "leakcheck", "intelx", "breaches",
+    "socradar",
 )
 _TIER_MIXED = (
     "forum", "foro", "breachforums", "xss", "exploit", "nulled", "cracked",
@@ -297,6 +298,30 @@ def build_entity_graph(domain: str, discovery: dict, threat_intel: dict) -> dict
     agg = dw.get("iocs", {}) if isinstance(dw, dict) else {}
     if isinstance(agg, dict):
         g.add_iocs(agg.get("iocs", {}), "darkweb_aggregate", link_to=root)
+
+    # ── SOCRadar: activos ASM + dark web/surface/VIP de la empresa ─────────────
+    sr = threat_intel.get("socradar", {}) if isinstance(threat_intel, dict) else {}
+    if isinstance(sr, dict) and sr.get("status") == "success":
+        asm = sr.get("asm", {}) or {}
+        if asm.get("status") == "ok":
+            # Dominios/subdominios → entidades subdominio (solo del dominio objetivo).
+            for d in asm.get("domains", []) or []:
+                d = str(d).strip().lower()
+                if d and (d == domain or d.endswith("." + domain)):
+                    k = g.add("subdominio", d, "socradar_asm", "trusted")
+                    g.relate(root, "tiene_subdominio", k, "socradar_asm")
+            # IPs → entidades ip relacionadas con el dominio.
+            for ip in asm.get("ips", []) or []:
+                ip = str(ip).strip()
+                if ip:
+                    k = g.add("ip", ip, "socradar_asm", "trusted")
+                    g.relate(root, "expone_ip", k, "socradar_asm")
+        # Hallazgos dark web / surface / VIP: vuelca cualquier IOC reconocible.
+        for clave in ("dark_web", "surface_web", "vip_protection"):
+            bloque = sr.get(clave, {}) or {}
+            items = bloque.get("findings") or bloque.get("results") or []
+            _ingest_hit_list(g, [i for i in items if isinstance(i, dict)],
+                             f"socradar_{clave}", root)
 
     graph = g.export()
     st = graph["stats"]

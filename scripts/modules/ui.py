@@ -584,6 +584,8 @@ def table_socradar(sr: Dict):
                 t.add_row("ASM · Dominios", ", ".join(asm["domains"][:6]) + (" …" if len(asm["domains"]) > 6 else ""))
         t.add_row("Vulnerabilidades", str(sr.get("vulnerabilities", {}).get("total", 0)))
         t.add_row("Dark Web (company)", f"{sr.get('dark_web', {}).get('total', 0)} hallazgo(s)")
+        t.add_row("Surface Web", f"{sr.get('surface_web', {}).get('total', 0)} mención(es)")
+        t.add_row("VIP / Ejecutivos", f"{sr.get('vip_protection', {}).get('total', 0)} hallazgo(s)")
         t.add_row("Incidentes", str(sr.get("incidents", {}).get("total", 0)))
         ident = sr.get("identity_intelligence")
         if ident:

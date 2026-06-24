@@ -283,6 +283,36 @@ class SocRadar:
             findings = data.get("records") or data.get("results") or []
         return {"status": "ok", "total": len(findings), "findings": findings[:50]}
 
+    # ── 3b) Surface Web Monitoring (GRATIS) ────────────────────────────────────
+
+    def get_surface_web_monitoring(self) -> Dict:
+        """Menciones de la marca en la web de superficie (pastes, foros clear…)."""
+        if not self.is_configured():
+            return {"status": "no_api_key", "message": "Configura SOCRadar en .env"}
+        print("[*] SOCRadar: Surface Web Monitoring...")
+        res = self._get(f"/company/{self.company_id}/surface_web_monitoring/v2")
+        if res["status"] != "ok":
+            return res
+        data = res["json"].get("data", {}) or {}
+        items = data.get("data", []) if isinstance(data, dict) else (data or [])
+        total = data.get("total_data_count", len(items)) if isinstance(data, dict) else len(items)
+        return {"status": "ok", "total": total, "findings": items[:50]}
+
+    # ── 3c) VIP Protection (GRATIS) ────────────────────────────────────────────
+
+    def get_vip_protection(self) -> Dict:
+        """Exposición de VIPs/ejecutivos de la empresa."""
+        if not self.is_configured():
+            return {"status": "no_api_key", "message": "Configura SOCRadar en .env"}
+        print("[*] SOCRadar: VIP Protection...")
+        res = self._get(f"/company/{self.company_id}/vip-protection/v2")
+        if res["status"] != "ok":
+            return res
+        data = res["json"].get("data", {}) or {}
+        items = data.get("data", []) if isinstance(data, dict) else (data or [])
+        total = data.get("total_data_count", len(items)) if isinstance(data, dict) else len(items)
+        return {"status": "ok", "total": total, "findings": items[:50]}
+
     # ── 4) Incidents (GRATIS) ──────────────────────────────────────────────────
 
     def get_incidents(self) -> Dict:
@@ -388,6 +418,8 @@ class SocRadar:
         out["asm"] = self.get_asm_assets(max_pages=asm_max_pages)
         out["vulnerabilities"] = self.get_asm_vulnerabilities()
         out["dark_web"] = self.get_dark_web_monitoring()
+        out["surface_web"] = self.get_surface_web_monitoring()
+        out["vip_protection"] = self.get_vip_protection()
         out["incidents"] = self.get_incidents()
 
         # Endpoints de pago (opt-in explícito, con tope de créditos).

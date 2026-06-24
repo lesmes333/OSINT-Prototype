@@ -1844,8 +1844,12 @@ class ReportGenerator:
             else:
                 dw_html += "<p class='muted'>✅ Sin hallazgos de dark web para la empresa en este momento.</p>"
 
+            sw_sr = sr.get('surface_web', {}) or {}
+            vip_sr = sr.get('vip_protection', {}) or {}
             extra_html = (
                 f"<p><b>Vulnerabilidades (ASM):</b> {vul_sr.get('total', 0)} · "
+                f"<b>Surface Web (menciones):</b> {sw_sr.get('total', 0)} · "
+                f"<b>VIP/Ejecutivos:</b> {vip_sr.get('total', 0)} · "
                 f"<b>Incidentes abiertos:</b> {inc_sr.get('total', 0)}</p>"
             )
 
