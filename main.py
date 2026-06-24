@@ -57,6 +57,17 @@ def parse_args(argv=None):
         help="Capa avanzada: crawling .onion vía Tor (requiere Tor en :9050). Desactivada por defecto.",
     )
     p.add_argument(
+        "--socradar", action=argparse.BooleanOptionalAction, default=None,
+        help="Inteligencia SOCRadar (ASM/activos, dark web, vulns, incidentes). "
+             "Solo endpoints GRATIS por defecto. Requiere SOCRADAR_API_KEY y "
+             "SOCRADAR_COMPANY_ID en .env.",
+    )
+    p.add_argument(
+        "--socradar-credits", action="store_true",
+        help="Permite que SOCRadar consuma créditos (Identity Intelligence). "
+             "Respeta SOCRADAR_MAX_CREDITS (def: 10). Desactivado por defecto.",
+    )
+    p.add_argument(
         "--browser", action="store_true",
         help="Renderizar páginas con JS usando Firefox/Playwright (respaldo en dark web). "
              "Desactivado por defecto: consume RAM. Requiere 'playwright install firefox'.",
@@ -135,7 +146,7 @@ def decide_phase(flag, interactive, prompt, default=False) -> bool:
 # ============================================================
 # PIPELINE POR DOMINIO
 # ============================================================
-def analyze_domain(domain, args, do_fp, do_dw):
+def analyze_domain(domain, args, do_fp, do_dw, do_sr=False):
     from scripts.modules.discovery import PassiveDiscovery
     from scripts.modules.threat_intel import ThreatIntel
     from scripts.modules.report import ReportGenerator
@@ -257,18 +268,54 @@ def analyze_domain(domain, args, do_fp, do_dw):
             out["darkweb"] = {"status": "error", "message": str(e)}
         return out
 
+    def _fase_socradar() -> dict:
+        """SOCRadar: ASM/activos + dark web + vulns + incidentes. Devuelve dict parcial."""
+        from scripts.modules.socradar import SocRadar
+
+        # Objetivos para Identity Intelligence (solo si se permiten créditos):
+        # el dominio + los emails públicos descubiertos por Hunter / .env.
+        id_targets = [domain]
+        hunter = threat_results.get("hunter", {})
+        if isinstance(hunter, dict):
+            id_targets += [e.get("value", "") for e in hunter.get("emails", []) if e.get("value")]
+        id_targets += [e for e in os.getenv("MONITOR_EMAILS", "").replace(";", ",").split(",") if e.strip()]
+        id_targets = [t for t in dict.fromkeys(id_targets) if t]
+
+        try:
+            sr = SocRadar(domain, cache_dir=os.path.join(args.output_dir, ".socradar_cache"))
+            if not sr.is_configured():
+                return {"socradar": {"status": "no_api_key",
+                                     "message": "Configura SOCRADAR_API_KEY y SOCRADAR_COMPANY_ID en .env"}}
+            max_credits = int(os.getenv("SOCRADAR_MAX_CREDITS", "10") or 10)
+            asm_pages = int(os.getenv("SOCRADAR_ASM_MAX_PAGES", "0") or 0)
+            return {"socradar": sr.run_all(
+                spend_credits=args.socradar_credits,
+                asm_max_pages=asm_pages,
+                identity_targets=id_targets,
+                max_credits=max_credits,
+            )}
+        except Exception as e:  # noqa: BLE001
+            return {"socradar": {"status": "error", "message": str(e)}}
+
     # Construir solo las fases activas y lanzarlas juntas.
     par_tasks = {}
     if do_fp:
         par_tasks["fingerprint"] = _fase_fingerprint
     if do_dw:
         par_tasks["exposicion"] = _fase_exposicion
+    if do_sr:
+        par_tasks["socradar"] = _fase_socradar
 
     if par_tasks:
-        ui.phase("FASES 2.5 + 4", "FINGERPRINTING ‖ EXPOSICIÓN (en paralelo)",
-                 ("Tecnologías+CVEs+INCIBE" if do_fp else "") +
-                 ("  ·  " if do_fp and do_dw else "") +
-                 ("Brechas+Dark web+Pastes" + (" · Tor" if args.tor else "") if do_dw else ""))
+        partes_fase = []
+        if do_fp:
+            partes_fase.append("Tecnologías+CVEs+INCIBE")
+        if do_dw:
+            partes_fase.append("Brechas+Dark web+Pastes" + (" · Tor" if args.tor else ""))
+        if do_sr:
+            partes_fase.append("SOCRadar (ASM/dark web)")
+        ui.phase("FASES 2.5 + 4", "FINGERPRINTING ‖ EXPOSICIÓN ‖ SOCRADAR (en paralelo)",
+                 "  ·  ".join(partes_fase))
         from scripts.modules.utils import run_named_parallel as _run_named_parallel
         with ui.progress_status("Ejecutando fingerprinting y exposición en paralelo…"):
             par_out = _run_named_parallel(par_tasks, max_workers=len(par_tasks))
@@ -294,6 +341,24 @@ def analyze_domain(domain, args, do_fp, do_dw):
             ui.table_exposure(threat_results.get("darkweb", {}))
     else:
         threat_results["darkweb"] = {"status": "skipped"}
+
+    if do_sr:
+        sr_res = threat_results.get("socradar", {})
+        if sr_res.get("status") == "success":
+            # Los activos ASM (dominios/subdominios) descubiertos por SOCRadar
+            # se incorporan al descubrimiento para no perderlos en el informe.
+            asm_domains = sr_res.get("asm", {}).get("domains", [])
+            rel = [d for d in asm_domains if d == domain or d.endswith("." + domain)]
+            if rel:
+                discovery.add_subdomains_from_list(rel, source="socradar_asm")
+                discovery_results["subdomains"] = sorted(discovery.subdomains)
+                discovery_results["total_subdomains"] = len(discovery.subdomains)
+                discovery_results["subdomain_sources"] = {k: sorted(v) for k, v in discovery.sources.items()}
+            ui.table_socradar(sr_res)
+        elif sr_res.get("status") in ("error", "no_api_key"):
+            ui.warn(f"SOCRadar: {sr_res.get('message', 'no disponible')}")
+    else:
+        threat_results["socradar"] = {"status": "skipped"}
 
     # --- DIAGNÓSTICO: claves API y herramientas (no detiene el escaneo) ---
     from scripts.modules import diagnostics as diag_mod
@@ -375,14 +440,25 @@ def main(argv=None):
     do_dw = True if args.all else decide_phase(
         args.darkweb, interactive, "   ¿Búsqueda en dark web? (s/n): ", default=False
     )
+    # SOCRadar solo si hay credenciales configuradas (si no, ni se ofrece).
+    sr_configured = bool(os.getenv("SOCRADAR_API_KEY") and os.getenv("SOCRADAR_COMPANY_ID"))
+    do_sr = False
+    if sr_configured:
+        do_sr = True if args.all else decide_phase(
+            args.socradar, interactive,
+            "   ¿Inteligencia SOCRadar (ASM/dark web, gratis)? (s/n): ", default=False
+        )
+    elif args.socradar:
+        ui.warn("SOCRadar solicitado pero falta SOCRADAR_API_KEY / SOCRADAR_COMPANY_ID en .env.")
 
     ui.info(
         f"\n[dim]Objetivos:[/] [bold]{len(domains)}[/]   "
         f"[dim]fingerprint:[/] {'✓' if do_fp else '✗'}   "
         f"[dim]dark web:[/] {'✓' if do_dw else '✗'}   "
+        f"[dim]SOCRadar:[/] {'✓' if do_sr else '✗'}   "
         f"[dim]hilos:[/] {args.threads}"
         if ui.enabled()
-        else f"\n[*] Dominios: {len(domains)} | fingerprint={do_fp} | darkweb={do_dw} | hilos={args.threads}"
+        else f"\n[*] Dominios: {len(domains)} | fingerprint={do_fp} | darkweb={do_dw} | socradar={do_sr} | hilos={args.threads}"
     )
 
     total = 0.0
@@ -390,7 +466,7 @@ def main(argv=None):
         for i, domain in enumerate(domains, 1):
             ui.domain_header(domain, i, len(domains))
             try:
-                total += analyze_domain(domain, args, do_fp, do_dw)
+                total += analyze_domain(domain, args, do_fp, do_dw, do_sr)
             except KeyboardInterrupt:
                 raise
             except Exception as e:  # noqa: BLE001

@@ -31,6 +31,7 @@ Herramienta OSINT (Open Source Intelligence) para **descubrir los activos expues
 | **2. Threat Intel** | Reputación, puertos, geolocalización, emails, menciones | 13 APIs (Shodan, VirusTotal, Censys, AbuseIPDB, Hunter…) |
 | **2.5. Tecnologías + CVEs** | Fingerprinting → CVEs → exploits → **INCIBE-CERT** | Wappalyzer, NVD, Exploit-DB, **INCIBE-CERT** |
 | **4. Exposición y filtraciones** | Brechas de datos + leaks en fuentes abiertas + dark web + Pastebin (+ Tor opcional) | XposedOrNot, URLScan, GitHub, Pastebin Pro, IntelX, Tor |
+| **4.5. SOCRadar** *(opcional)* | ASM/activos de la empresa + dark web + vulnerabilidades + incidentes | **SOCRadar** (`--socradar`) |
 | **3. Informes** | JSON · CSV · Markdown · **HTML visual** | — |
 
 ### ⚡ Rápido por diseño
@@ -60,6 +61,27 @@ Detecta exposición del dominio en fuentes públicas, deep web y dark web **lega
 **Sin ninguna clave de pago**, la Fase 4 funciona con: XposedOrNot + XposedOrNot domain-level + URLScan + GitHub + Pastebin/Tor + **todos los motores .onion** (con Tor) + ransomware.live + RansomLook + Maltiverse + **Capa 6 completa** (80 leak sites + foros + infostealers + Telegram).
 
 > ✅ Solo se consultan índices y APIs públicas. No se accede a sistemas ajenos ni se descarga contenido ilegal. Acorde con un marco defensivo y autorizado.
+
+### 🛰️ Inteligencia externa con SOCRadar (opcional, `--socradar`)
+
+Integración con la plataforma [SOCRadar](https://platform.socradar.com) para aportar la visión de **superficie de ataque (ASM)** y **dark web** que su motor mantiene sobre tu **empresa** (la cuenta freemium está ligada a un `company_id`, no a un dominio arbitrario).
+
+| Capacidad | Coste | Flag |
+|-----------|-------|------|
+| **ASM Digital Footprint** — activos descubiertos (dominios, webs, IPs, DNS, tecnologías) | **gratis** (0 créditos) | `--socradar` |
+| **ASM Vulnerabilities** — vulnerabilidades de los activos | **gratis** | `--socradar` |
+| **Dark Web Monitoring** — hallazgos de dark web ligados a la empresa | **gratis** | `--socradar` |
+| **Incidents / License Overview** — incidentes abiertos y saldo de créditos | **gratis** | `--socradar` |
+| **Identity Intelligence** — credenciales/identidades filtradas | **1 crédito/consulta** | `--socradar --socradar-credits` |
+| **IoC Enrichment** — enriquecimiento de IOCs | **1 crédito/consulta** | (uso programático) |
+
+- Los **activos ASM (dominios/subdominios)** se incorporan automáticamente al descubrimiento y al informe (fuente `socradar_asm`).
+- El informe HTML añade una **sección SOCRadar** con los activos por tipo, dark web, vulnerabilidades, incidentes y el **saldo de créditos** restante.
+- Por defecto **solo se usan endpoints gratis**. Los de créditos exigen `--socradar-credits` y respetan un tope (`SOCRADAR_MAX_CREDITS`, def. 10).
+- ⚠️ Las APIs de **créditos requieren una API Key adicional** (`SOCRADAR_ADVANCED_API_KEY`), distinta de la estándar; sin ella devuelven `HTTP 402` y la herramienta lo indica sin gastar créditos.
+- En freemium los créditos de **`dark_web` suelen ser 0** → la API global *CTI Dark Web News* no está disponible; se usa el *Dark Web Monitoring* ligado a la empresa (gratis).
+
+Configura en `.env`: `SOCRADAR_API_KEY`, `SOCRADAR_COMPANY_ID` (y opcionalmente `SOCRADAR_ADVANCED_API_KEY`). La API key y el `company_id` se obtienen en la plataforma → **Settings → API Options**. Respeta el rate limit de **1 req/s** automáticamente.
 
 ### 🔎 Extracción y exportación de IOCs
 

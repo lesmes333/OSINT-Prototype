@@ -120,6 +120,7 @@ a.card .lbl::after{{content:" ↗";opacity:.55;font-size:10px}}
 {cve_section}
 {ew_section}
 {dw_section}
+{socradar_section}
 {entities_section}
 <footer>Generado por <b>OSINT Recon Suite</b> · Created by Cristian &amp; Luisber</footer>
 </div></body></html>"""
@@ -914,6 +915,10 @@ class ReportGenerator:
             ("Fichas INCIBE", vuln.get('incibe_refs', 0) if vuln.get('status') == 'success' else "—", "yellow", "cve"),
             ("Enlaces .onion", dw.get('total_links_found', 0) if dw.get('status') == 'success' else "—", "gray", "darkweb"),
         ]
+        _sr = threat_data.get('socradar', {})
+        if isinstance(_sr, dict) and _sr.get('status') == 'success':
+            cards.append(("Activos SOCRadar",
+                          _sr.get('asm', {}).get('total', 0), "cyan", "socradar"))
         cards_html = "".join(
             f'<a class="card {c}" href="#{anchor}"><div class="num">{escape(str(v))}</div><div class="lbl">{escape(t)}</div></a>'
             for t, v, c, anchor in cards
@@ -971,6 +976,15 @@ class ReportGenerator:
             exec_items.append(("ok",
                 f"🆕 <b>{n_new_ent}</b> entidad(es) nueva(s) desde el último escaneo. "
                 f"<a href='#entidades'>Ver entidades →</a>"))
+        _sr_exec = threat_data.get('socradar', {})
+        if isinstance(_sr_exec, dict) and _sr_exec.get('status') == 'success':
+            _sr_assets = _sr_exec.get('asm', {}).get('total', 0)
+            _sr_dw = _sr_exec.get('dark_web', {}).get('total', 0)
+            _kind = "warn" if _sr_dw else "ok"
+            _dw_txt = f" · <b>{_sr_dw}</b> hallazgo(s) dark web" if _sr_dw else ""
+            exec_items.append((_kind,
+                f"🛰️ SOCRadar: <b>{_sr_assets}</b> activo(s) en la superficie externa{_dw_txt}. "
+                f"<a href='#socradar'>Ver SOCRadar →</a>"))
         # Contexto siempre útil (sin severidad): superficie descubierta.
         ctx = (f"🌐 <b>{discovery_data.get('total_subdomains', 0)}</b> subdominios "
                f"(<b>{n_active}</b> activos)")
@@ -1772,6 +1786,89 @@ class ReportGenerator:
             f"<tbody>{ti_rows}</tbody></table></section>"
         ) if ti_rows else ""
 
+        # ---- Sección SOCRadar ----
+        socradar_section = ""
+        sr = threat_data.get('socradar', {})
+        if isinstance(sr, dict) and sr.get('status') == 'success':
+            ov = sr.get('overview', {}) or {}
+            asm = sr.get('asm', {}) or {}
+            creds = ov.get('credits', {}) or {}
+
+            # Cabecera: plan + créditos
+            cred_chips = "".join(
+                f"<span class='badge {'low' if v else 'unk'}'>{escape(k)}: {escape(str(v))}</span> "
+                for k, v in creds.items()
+            )
+            head = (
+                f"<p class='muted'>Plan <b>{escape(str(ov.get('plan', '—')))}</b> "
+                f"({escape(str(ov.get('subscription_status', '')))}, caduca {escape(str(ov.get('expire_date', '—')))}) "
+                f"· empresa <b>{escape(str(ov.get('company_name', '')))}</b> "
+                f"· créditos gastados en este escaneo: <b>{sr.get('credits_spent', 0)}</b></p>"
+                f"<p>Saldo de créditos: {cred_chips or '—'}</p>"
+            )
+
+            # ASM: activos por tipo + listas clave
+            asm_html = ""
+            if asm.get('status') == 'ok':
+                by_rows = "".join(
+                    f"<tr><td>{escape(t)}</td><td>{escape(str(n))}</td></tr>"
+                    for t, n in asm.get('by_type', {}).items()
+                )
+                def _lista(items, lim=40):
+                    if not items:
+                        return "<span class='muted'>—</span>"
+                    extra = f" <span class='muted'>… +{len(items) - lim}</span>" if len(items) > lim else ""
+                    return ", ".join(f"<code>{escape(x)}</code>" for x in items[:lim]) + extra
+                asm_html = (
+                    f"<h3>🛰️ ASM — Activos descubiertos: {asm.get('total', 0)} "
+                    f"<span class='muted'>(mostrados {asm.get('fetched', 0)})</span></h3>"
+                    f"<div class='tablewrap'><table><thead><tr><th>Tipo de activo</th><th>Nº</th></tr></thead>"
+                    f"<tbody>{by_rows}</tbody></table></div>"
+                    f"<p><b>Dominios/subdominios:</b> {_lista(asm.get('domains', []))}</p>"
+                    f"<p><b>Webs:</b> {_lista(asm.get('websites', []))}</p>"
+                    f"<p><b>IPs:</b> {_lista(asm.get('ips', []))}</p>"
+                    f"<p><b>Tecnologías:</b> {_lista(asm.get('technologies', []), lim=60)}</p>"
+                )
+
+            # Dark web (company) + vulns + incidentes
+            dw_sr = sr.get('dark_web', {}) or {}
+            vul_sr = sr.get('vulnerabilities', {}) or {}
+            inc_sr = sr.get('incidents', {}) or {}
+            dw_html = f"<h3>🌑 Dark Web (monitorización de la empresa): {dw_sr.get('total', 0)} hallazgo(s)</h3>"
+            if dw_sr.get('findings'):
+                fr = "".join(
+                    f"<tr><td class='muted'>{escape(str(f)[:200])}</td></tr>"
+                    for f in dw_sr.get('findings', [])[:20]
+                )
+                dw_html += f"<div class='tablewrap'><table><tbody>{fr}</tbody></table></div>"
+            else:
+                dw_html += "<p class='muted'>✅ Sin hallazgos de dark web para la empresa en este momento.</p>"
+
+            extra_html = (
+                f"<p><b>Vulnerabilidades (ASM):</b> {vul_sr.get('total', 0)} · "
+                f"<b>Incidentes abiertos:</b> {inc_sr.get('total', 0)}</p>"
+            )
+
+            # Identity Intelligence (si se gastaron créditos)
+            ident_html = ""
+            ident = sr.get('identity_intelligence')
+            if ident and ident.get('results'):
+                hits = [r for r in ident['results'] if isinstance(r, dict) and r.get('status') == 'ok']
+                ident_html = (
+                    f"<h3>🪪 Identity Intelligence <span class='muted'>(consume créditos)</span></h3>"
+                    f"<p class='muted'>{len(hits)} objetivo(s) consultado(s).</p>"
+                )
+
+            socradar_section = (
+                f"<section id='socradar'><h2>🛰️ SOCRadar — Inteligencia externa</h2>"
+                f"{head}{asm_html}{dw_html}{extra_html}{ident_html}</section>"
+            )
+        elif isinstance(sr, dict) and sr.get('status') in ('error', 'no_api_key'):
+            socradar_section = (
+                f"<section id='socradar'><h2>🛰️ SOCRadar</h2>"
+                f"<p class='muted'>{escape(str(sr.get('message', 'no disponible')))}</p></section>"
+            )
+
         html = _HTML_TEMPLATE.format(
             domain=escape(domain),
             ip=escape(str(threat_data.get('ip_address', 'N/D'))),
@@ -1789,6 +1886,7 @@ class ReportGenerator:
             cve_section=cve_section,
             ew_section=ew_section,
             dw_section=dw_section,
+            socradar_section=socradar_section,
             entities_section=entities_section,
         )
         with open(filename, 'w', encoding='utf-8') as f:

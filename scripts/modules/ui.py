@@ -560,6 +560,44 @@ def table_darkweb(dw: Dict):
         _plain(f"\nDark Web: {dw.get('total_links_found', 0)} enlaces .onion")
 
 
+def table_socradar(sr: Dict):
+    """Resumen de la inteligencia de SOCRadar (ASM, dark web, vulns, créditos)."""
+    if not isinstance(sr, dict) or sr.get("status") != "success":
+        return
+    ov = sr.get("overview", {})
+    asm = sr.get("asm", {})
+    creds = ov.get("credits", {}) if isinstance(ov, dict) else {}
+
+    if _RICH:
+        plan = ov.get("plan", "—")
+        exp = ov.get("expire_date", "—")
+        console.print(f"[bold]🛰️  SOCRadar[/] · plan [cyan]{plan}[/] (caduca {exp}) · "
+                      f"créditos gastados: [bold]{sr.get('credits_spent', 0)}[/]")
+        t = Table(title="SOCRadar — Inteligencia externa (cuenta Zunder)", box=box.SIMPLE, header_style="bold magenta")
+        t.add_column("Fuente", style="cyan")
+        t.add_column("Hallazgos", style="white")
+        if asm.get("status") == "ok":
+            by = asm.get("by_type", {})
+            tipos = ", ".join(f"{k}:{v}" for k, v in list(by.items())[:5])
+            t.add_row("ASM · Activos", f"{asm.get('total', 0)} activos ({tipos})")
+            if asm.get("domains"):
+                t.add_row("ASM · Dominios", ", ".join(asm["domains"][:6]) + (" …" if len(asm["domains"]) > 6 else ""))
+        t.add_row("Vulnerabilidades", str(sr.get("vulnerabilities", {}).get("total", 0)))
+        t.add_row("Dark Web (company)", f"{sr.get('dark_web', {}).get('total', 0)} hallazgo(s)")
+        t.add_row("Incidentes", str(sr.get("incidents", {}).get("total", 0)))
+        ident = sr.get("identity_intelligence")
+        if ident:
+            t.add_row("Identity Intelligence", f"{len(ident.get('results', []))} consulta(s) [créditos]")
+        console.print(t)
+        cred_txt = " · ".join(f"{k}:{v}" for k, v in creds.items())
+        if cred_txt:
+            console.print(f"[dim]  Saldo de créditos → {cred_txt}[/dim]")
+    else:
+        _plain(f"\nSOCRadar: {asm.get('total', 0)} activos ASM, "
+               f"{sr.get('dark_web', {}).get('total', 0)} hallazgos dark web, "
+               f"{sr.get('credits_spent', 0)} créditos gastados")
+
+
 # ============================================================
 # Resumen final por dominio
 # ============================================================
